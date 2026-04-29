@@ -1,0 +1,118 @@
+import { useNavigate } from 'react-router-dom';
+import { MessageCircle, GitBranch, Users, ArrowRight } from 'lucide-react';
+import Aurora from '../components/Aurora';
+import NavBar from '../components/layout/NavBar';
+
+export default function HomePage() {
+  const navigate = useNavigate();
+
+  return (
+    <div className="bg-surface text-on-surface min-h-screen">
+      <NavBar variant="glass" />
+
+      {/* Aurora - full viewport behind nav */}
+      <div className="fixed inset-0 opacity-60 z-0">
+        <Aurora colorStops={['#006d33', '#00ae55', '#66ff95']} amplitude={1.0} blend={0.5} speed={0.8} />
+      </div>
+
+      <main className="relative z-10 pt-16">
+        {/* Hero */}
+        <section className="relative min-h-[80vh] flex flex-col justify-center px-8">
+          <div className="max-w-3xl mx-auto w-full text-center py-20">
+            <h1 className="text-4xl md:text-6xl font-extrabold text-on-surface tracking-tight leading-tight mb-6">
+              你还记得上次<br/>和 TA 聊天是什么时候吗？
+            </h1>
+            <p className="text-lg md:text-xl text-zinc-500 max-w-lg mx-auto leading-relaxed mb-10">
+              导入聊天记录，让 TA 的说话方式、语气、口头禅都被记住。<br/>
+              你可以继续和 TA 聊天，也可以回到过去某个瞬间，重新来一次。
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <button onClick={() => navigate('/import')} className="bg-primary text-on-primary px-8 py-4 rounded-md font-bold text-base shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
+                导入聊天记录
+                <ArrowRight size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-zinc-400 mt-6">所有数据只存在你的浏览器里，不会上传到任何服务器</p>
+          </div>
+        </section>
+
+        {/* Features */}
+        <section className="py-24 px-8 bg-surface-container-low">
+          <div className="max-w-5xl mx-auto">
+            <div className="mb-16 max-w-xl">
+              <h2 className="text-3xl font-extrabold tracking-tight mb-4">你能做什么</h2>
+              <p className="text-zinc-500">三种方式，和记忆里的人重新对话。</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="bg-surface-container-lowest p-10 rounded-xl">
+                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-6">
+                  <MessageCircle size={24} />
+                </div>
+                <h3 className="text-xl font-bold mb-3">继续聊天</h3>
+                <p className="text-zinc-500 leading-relaxed text-sm">像平常一样和 TA 发消息。TA 的语气、口头禅、回复节奏都和真人一样。</p>
+              </div>
+              <div className="bg-surface-container-lowest p-10 rounded-xl">
+                <div className="w-12 h-12 rounded-lg bg-secondary/10 flex items-center justify-center text-secondary mb-6">
+                  <GitBranch size={24} />
+                </div>
+                <h3 className="text-xl font-bold mb-3">IF 线</h3>
+                <p className="text-zinc-500 leading-relaxed text-sm">回到过去某一天，重新经历那些对话。这次你可以说不同的话，看看会发生什么。</p>
+              </div>
+              <div className="bg-surface-container-lowest p-10 rounded-xl">
+                <div className="w-12 h-12 rounded-lg bg-tertiary/10 flex items-center justify-center text-tertiary mb-6">
+                  <Users size={24} />
+                </div>
+                <h3 className="text-xl font-bold mb-3">群聊</h3>
+                <p className="text-zinc-500 leading-relaxed text-sm">把几个角色拉到一个群里，看他们像真人一样聊天、互怼、分享日常。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Steps */}
+        <section className="py-24 px-8 bg-surface">
+          <div className="max-w-4xl mx-auto">
+            <div className="mb-16 max-w-xl">
+              <h2 className="text-3xl font-extrabold tracking-tight mb-4">怎么开始</h2>
+            </div>
+            <div className="flex flex-col gap-12">
+              <div className="flex gap-6 items-start">
+                <div className="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-sm shrink-0">1</div>
+                <div>
+                  <h3 className="font-bold text-lg mb-2">导入聊天记录</h3>
+                  <p className="text-zinc-500 text-sm leading-relaxed">直接粘贴文字，或者上传微信导出的聊天文件。图片和视频也会被解析。</p>
+                </div>
+              </div>
+              <div className="flex gap-6 items-start">
+                <div className="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-bold text-sm shrink-0">2</div>
+                <div>
+                  <h3 className="font-bold text-lg mb-2">确认角色画像</h3>
+                  <p className="text-zinc-500 text-sm leading-relaxed">系统会自动分析 TA 的说话风格、性格、你们之间的记忆。你可以修改任何不准确的地方。</p>
+                </div>
+              </div>
+              <div className="flex gap-6 items-start">
+                <div className="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-bold text-sm shrink-0">3</div>
+                <div>
+                  <h3 className="font-bold text-lg mb-2">开始对话</h3>
+                  <p className="text-zinc-500 text-sm leading-relaxed">选择聊天、IF 线或者群聊。界面和微信一样，就像真的在和那个人发消息。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* Footer */}
+      <footer className="w-full py-8 border-t border-zinc-100 bg-surface">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center px-8 space-y-4 md:space-y-0">
+          <div className="text-xs text-zinc-400">© 2025 Copy Chat</div>
+          <div className="flex space-x-8">
+            <span className="text-xs text-zinc-400">隐私</span>
+            <span className="text-xs text-zinc-400">条款</span>
+            <span className="text-xs text-zinc-400">帮助</span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}

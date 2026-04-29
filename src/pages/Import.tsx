@@ -1,0 +1,440 @@
+import { useState, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Upload, FileText, AlertCircle, CheckCircle, Loader2, ChevronRight, ClipboardPaste, FolderOpen, Image, Video, MessageSquare } from 'lucide-react';
+import { parseTextChat } from '../services/parser/textParser';
+import { parseHTMLChat, buildFileMap } from '../services/parser';
+import NavBar from '../components/layout/NavBar';
+import type { ParseResult } from '../services/parser/textParser';
+import type { HTMLParseResult } from '../services/parser/htmlParser';
+import { generateFromParsedData } from '../services/profileGenerator';
+import type { GenerationResult } from '../services/profileGenerator';
+import { useLLMStore } from '../stores/llmStore';
+import { useCharacterStore } from '../stores/characterStore';
+import { saveCharacter } from '../services/storage';
+import type { Character } from '../types/character';
+
+type Step = 'import' | 'confirm' | 'done';
+
+export default function ImportPage() {
+  const navigate = useNavigate();
+  const getActiveConfig = useLLMStore((s) => s.getActiveConfig);
+  const addCharacter = useCharacterStore((s) => s.addCharacter);
+
+  const [step, setStep] = useState<Step>('import');
+  const [textValue, setTextValue] = useState('');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+
+  const [parseResult, setParseResult] = useState<ParseResult | HTMLParseResult | null>(null);
+  const [sourceType, setSourceType] = useState<'text-paste' | 'html-upload'>('text-paste');
+  const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // ─── File handling ───
+
+  const handleFileSelect = useCallback((files: FileList | File[]) => {
+    setSelectedFiles(Array.from(files));
+    setError(null);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files);
+  }, [handleFileSelect]);
+
+  // ─── Parse ───
+
+  const handleParse = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (textValue.trim()) {
+        const result = parseTextChat(textValue);
+        if (result.messages.length === 0) {
+          setError('未能解析出有效的聊天记录，请检查格式');
+          setLoading(false);
+          return;
+        }
+        setParseResult(result);
+        setSourceType('text-paste');
+      } else if (selectedFiles.length > 0) {
+        const htmlFile = selectedFiles.find(f => f.name.endsWith('.html') || f.name.endsWith('.htm'));
+        if (!htmlFile) {
+          setError('未找到 HTML 文件');
+          setLoading(false);
+          return;
+        }
+        const htmlContent = await htmlFile.text();
+        const fileMap = buildFileMap(selectedFiles);
+        const result = await parseHTMLChat(htmlContent, fileMap);
+        if (result.messages.length === 0) {
+          setError('未能从 HTML 文件中解析出有效的聊天记录');
+          setLoading(false);
+          return;
+        }
+        setParseResult(result);
+        setSourceType('html-upload');
+      } else {
+        setError('请粘贴聊天记录或上传文件');
+        setLoading(false);
+        return;
+      }
+      setStep('confirm');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '解析失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [textValue, selectedFiles]);
+
+  // ─── Generate profile ───
+
+  const handleGenerate = useCallback(async () => {
+    if (!parseResult) return;
+    const llmConfig = getActiveConfig();
+    if (!llmConfig) { setError('请先在设置中配置 LLM API'); return; }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await generateFromParsedData(parseResult, llmConfig);
+      setGenerationResult(result);
+      setStep('done');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '画像生成失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [parseResult, getActiveConfig]);
+
+  // ─── Save ───
+
+  const saveCharacter_ = useCallback((target: 'chat' | 'edit' | 'list') => {
+    if (!generationResult) return;
+    const character: Character = {
+      id: `char_${Date.now()}`,
+      ...generationResult.character,
+      createdAt: new Date().toISOString(),
+      sourceType,
+    };
+    addCharacter(character);
+    saveCharacter(character);
+    if (target === 'list') {
+      navigate('/characters');
+    } else {
+      navigate(`/characters/${character.id}/${target}`);
+    }
+  }, [generationResult, sourceType, addCharacter, navigate]);
+
+  // ─── Steps indicator ───
+
+  const steps = [
+    { key: 'import' as const, label: '导入', num: 1 },
+    { key: 'confirm' as const, label: '确认画像', num: 2 },
+    { key: 'done' as const, label: '开始对话', num: 3 },
+  ];
+  const currentStepIndex = steps.findIndex(s => s.key === step);
+
+  return (
+    <div className="bg-surface text-on-surface min-h-screen">
+      {/* Nav */}
+      <NavBar variant="solid" />
+
+      <main className="pt-24 pb-20 px-6 max-w-5xl mx-auto">
+        {/* Progress */}
+        <div className="flex justify-center items-center space-x-4 mb-10">
+          {steps.map((s, i) => (
+            <div key={s.key} className="flex items-center">
+              <div className="flex flex-col items-center">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${
+                  i <= currentStepIndex
+                    ? 'bg-primary text-on-primary ring-4 ring-primary/20'
+                    : 'bg-surface-container-high text-on-surface-variant'
+                }`}>
+                  {i < currentStepIndex ? <CheckCircle size={16} /> : s.num}
+                </div>
+                <span className={`text-xs mt-2 tracking-wider ${
+                  i <= currentStepIndex ? 'font-semibold text-primary' : 'font-medium text-on-surface-variant'
+                }`}>
+                  {s.label}
+                </span>
+              </div>
+              {i < steps.length - 1 && (
+                <div className={`w-16 h-px mx-4 ${i < currentStepIndex ? 'bg-primary' : 'bg-outline-variant'}`} />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="mb-6 p-4 rounded-lg flex items-center gap-2 bg-error/10 text-error max-w-2xl mx-auto">
+            <AlertCircle size={18} className="shrink-0" />
+            <span className="text-sm">{error}</span>
+          </div>
+        )}
+
+        {/* Step 1: Import */}
+        {step === 'import' && (
+          <>
+            <h1 className="text-3xl font-extrabold tracking-tight mb-2 text-center">选择导入方式</h1>
+            <p className="text-secondary max-w-xl mx-auto leading-relaxed text-center mb-10">
+              把聊天记录导入进来，系统会自动分析对方的说话风格。
+            </p>
+
+            <div className="grid md:grid-cols-2 gap-8 items-stretch">
+              {/* Text Paste */}
+              <div className="bg-surface-container-low rounded-xl p-8 flex flex-col">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-primary shadow-sm">
+                    <ClipboardPaste size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold" style={{ color: 'var(--color-primary)' }}>文本粘贴</h2>
+                    <p className="text-xs text-secondary font-medium">快速导入</p>
+                  </div>
+                </div>
+
+                <div className="flex-grow">
+                  <label className="block text-sm font-semibold text-on-surface-variant mb-2">聊天记录</label>
+                  <textarea
+                    className="w-full h-64 bg-surface-container-lowest rounded-lg p-4 text-sm text-on-surface focus:ring-2 focus:ring-primary-container transition-all placeholder:text-on-surface-variant outline-none"
+                    placeholder={`从微信复制聊天记录，粘贴到这里...\n\n小林 14:32\n在吗\n\n我 14:33\n在呢怎么了\n\n小林 14:33\n周末有空吗 想去看电影`}
+                    value={textValue}
+                    onChange={(e) => setTextValue(e.target.value)}
+                  />
+                </div>
+
+                <div className="mt-6 flex flex-col gap-4">
+                  <div className="bg-surface-container-high/50 rounded-lg p-4 text-xs text-on-surface-variant leading-relaxed">
+                    <strong className="text-emerald-800 block mb-1">支持的内容：</strong>
+                    文字消息、时间、表情符号
+                  </div>
+                  <div className="bg-tertiary/5 rounded-lg p-4 text-xs leading-relaxed text-tertiary">
+                    <strong className="block mb-1">不支持：</strong>
+                    图片和视频无法解析（会显示为 [图片] [视频]）
+                  </div>
+                  <button
+                    onClick={handleParse}
+                    disabled={loading || !textValue.trim()}
+                    className="w-full bg-primary text-on-primary py-4 rounded-md font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+                  >
+                    {loading ? <><Loader2 size={16} className="animate-spin" /> 解析中...</> : '解析聊天记录'}
+                  </button>
+                </div>
+              </div>
+
+              {/* HTML Upload */}
+              <div className="bg-surface-container-low rounded-xl p-8 flex flex-col">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-secondary shadow-sm">
+                    <FolderOpen size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold" style={{ color: 'var(--color-primary)' }}>上传聊天文件</h2>
+                    <p className="text-xs text-secondary font-medium">完整解析</p>
+                  </div>
+                </div>
+
+                <div
+                  className={`flex-grow flex flex-col items-center justify-center border-2 border-dashed rounded-xl bg-surface-container-lowest/50 hover:bg-surface-container-lowest transition-colors cursor-pointer p-8 text-center group min-h-[256px] ${
+                    dragOver ? 'border-primary bg-surface-container-lowest' : 'border-emerald-900/10'
+                  }`}
+                  onDrop={handleDrop}
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <div className="mb-4 text-emerald-800/40 group-hover:text-primary transition-colors">
+                    <Upload size={56} />
+                  </div>
+                  <p className="text-sm font-bold text-on-surface mb-1">把文件夹拖到这里</p>
+                  <p className="text-xs text-on-surface-variant mb-6">支持 WeFlow 导出的 HTML + 资源文件夹</p>
+                  <div className="flex gap-3 justify-center">
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700">
+                      <Image size={14} />
+                      <span className="text-[10px] font-bold">图片</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700">
+                      <Video size={14} />
+                      <span className="text-[10px] font-bold">视频</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700">
+                      <MessageSquare size={14} />
+                      <span className="text-[10px] font-bold">文字</span>
+                    </div>
+                  </div>
+                </div>
+
+                <input ref={fileInputRef} type="file" accept=".html,.htm" multiple className="hidden" onChange={(e) => { if (e.target.files) handleFileSelect(e.target.files); }} />
+
+                {selectedFiles.length > 0 && (
+                  <div className="mt-3 p-2 bg-primary/10 rounded-lg">
+                    <p className="text-xs font-semibold text-primary">已选择 {selectedFiles.length} 个文件</p>
+                    <div className="max-h-12 overflow-y-auto mt-1">
+                      {selectedFiles.slice(0, 3).map((f, i) => (
+                        <p key={i} className="text-xs text-on-surface-variant truncate">{f.name}</p>
+                      ))}
+                      {selectedFiles.length > 3 && <p className="text-xs text-on-surface-variant">... 还有 {selectedFiles.length - 3} 个</p>}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-6 flex flex-col gap-4">
+                  <div className="bg-surface-container-high/50 rounded-lg p-4 text-xs text-on-surface-variant leading-relaxed">
+                    <strong className="text-emerald-800 block mb-1">支持的内容：</strong>
+                    文字消息、图片、视频全部内容，自动解析图片和视频的含义
+                  </div>
+                  <div className="bg-tertiary/5 rounded-lg p-4 text-xs leading-relaxed text-tertiary">
+                    <strong className="block mb-1">需要导出工具：</strong>
+                    请先下载 <a href="https://github.com/hicccc77/WeFlow" target="_blank" rel="noopener noreferrer" className="underline font-semibold hover:opacity-80">WeFlow</a> 将微信聊天记录导出为 HTML 文件，然后把导出的文件夹拖到上方区域即可
+                  </div>
+                  <button
+                    onClick={handleParse}
+                    disabled={loading || selectedFiles.length === 0}
+                    className="w-full bg-secondary text-on-secondary py-4 rounded-md font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+                  >
+                    {loading ? <><Loader2 size={16} className="animate-spin" /> 解析中...</> : '选择文件'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Step 2: Confirm */}
+        {step === 'confirm' && parseResult && (
+          <div className="max-w-2xl mx-auto">
+            <h1 className="text-3xl font-extrabold tracking-tight mb-2 text-center">确认解析结果</h1>
+            <p className="text-secondary max-w-xl mx-auto leading-relaxed text-center mb-10">
+              以下是从聊天记录中解析出的信息，确认无误后生成画像。
+            </p>
+
+            <div className="bg-surface-container-lowest rounded-xl p-6 border border-outline-variant">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="text-center p-3 rounded-lg bg-surface-container-low">
+                  <p className="text-2xl font-bold text-primary">{parseResult.totalMessages}</p>
+                  <p className="text-xs text-on-surface-variant">消息数</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-surface-container-low">
+                  <p className="text-2xl font-bold text-secondary">{parseResult.participants.other}</p>
+                  <p className="text-xs text-on-surface-variant">对方昵称</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-surface-container-low">
+                  <p className="text-sm font-bold text-on-surface">{parseResult.startDate || '未知'}</p>
+                  <p className="text-xs text-on-surface-variant">起始日期</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-surface-container-low">
+                  <p className="text-sm font-bold text-on-surface">{parseResult.endDate || '未知'}</p>
+                  <p className="text-xs text-on-surface-variant">结束日期</p>
+                </div>
+              </div>
+
+              <h3 className="text-sm font-medium mb-2 text-on-surface-variant">消息预览（前 10 条）</h3>
+              <div className="space-y-2 max-h-48 overflow-y-auto mb-6">
+                {parseResult.messages.slice(0, 10).map((msg) => (
+                  <div key={msg.id} className="flex gap-2 text-sm">
+                    <span className="font-medium shrink-0 text-primary">{msg.sender === 'user' ? '我' : parseResult.participants.other}</span>
+                    <span className="text-on-surface">{msg.content}</span>
+                  </div>
+                ))}
+              </div>
+
+              {!getActiveConfig() && (
+                <div className="p-3 rounded-lg mb-4 flex items-center gap-2 bg-error/10 text-error">
+                  <AlertCircle size={16} />
+                  <span className="text-sm">请先在设置中配置 LLM API，否则无法生成画像</span>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button onClick={() => setStep('import')} className="px-6 py-2.5 rounded-md text-sm font-medium bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors">
+                  返回修改
+                </button>
+                <button
+                  onClick={handleGenerate}
+                  disabled={loading || !getActiveConfig()}
+                  className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-primary text-on-primary flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {loading ? <><Loader2 size={16} className="animate-spin" /> 正在生成画像...</> : <><FileText size={16} /> 生成画像 <ChevronRight size={14} /></>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Done */}
+        {step === 'done' && generationResult && (
+          <div className="max-w-2xl mx-auto">
+            <div className="bg-surface-container-lowest rounded-xl p-8 border border-outline-variant text-center">
+              <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-primary">
+                <CheckCircle size={32} className="text-on-primary" />
+              </div>
+              <h2 className="text-xl font-bold text-on-surface mb-1">画像已生成</h2>
+              <p className="text-sm text-on-surface-variant mb-6">{generationResult.character.identity.name} 的画像已就绪</p>
+
+              <div className="space-y-3 text-left mb-6">
+                <div className="p-3 rounded-lg bg-surface-container-low">
+                  <h3 className="text-xs font-medium mb-1 text-on-surface-variant">身份</h3>
+                  <p className="text-sm text-on-surface">
+                    {generationResult.character.identity.name}
+                    {generationResult.character.identity.ageEstimate && ` · ${generationResult.character.identity.ageEstimate}`}
+                    {generationResult.character.identity.occupationHint && ` · ${generationResult.character.identity.occupationHint}`}
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg bg-surface-container-low">
+                  <h3 className="text-xs font-medium mb-1 text-on-surface-variant">性格标签</h3>
+                  <div className="flex flex-wrap gap-1">
+                    {generationResult.character.persona.personalityTags.map((tag, i) => (
+                      <span key={i} className="px-2 py-0.5 rounded-full text-xs bg-secondary-container text-on-secondary-container">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-surface-container-low">
+                  <h3 className="text-xs font-medium mb-1 text-on-surface-variant">时间轴事件（{generationResult.events.length} 个）</h3>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {generationResult.events.slice(0, 5).map((ev, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs">
+                        <span className="text-secondary">{ev.date}</span>
+                        <span className="text-on-surface">{ev.summary}</span>
+                      </div>
+                    ))}
+                    {generationResult.events.length > 5 && (
+                      <p className="text-xs text-on-surface-variant">... 还有 {generationResult.events.length - 5} 个事件</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => saveCharacter_('edit')} className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors">
+                  查看画像（可编辑）
+                </button>
+                <button onClick={() => saveCharacter_('chat')} className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-primary text-on-primary">
+                  确认并开始聊天
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="w-full py-8 border-t border-outline-variant bg-surface">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center px-8 space-y-4 md:space-y-0">
+          <div className="text-xs text-on-surface-variant">© 2026 Copy Chat</div>
+          <div className="flex space-x-8">
+            <span className="text-xs text-on-surface-variant">隐私</span>
+            <span className="text-xs text-on-surface-variant">条款</span>
+            <span className="text-xs text-on-surface-variant">帮助</span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}

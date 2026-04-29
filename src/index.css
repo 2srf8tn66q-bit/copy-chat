@@ -1,0 +1,152 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #1a1a1c;
+  --color-surface-container: #222225;
+  --color-surface-container-low: #1e1e20;
+  --color-surface-container-lowest: #252528;
+  --color-surface-container-high: #2c2c30;
+  --color-surface-container-highest: #353538;
+  --color-on-surface: #f0f0f0;
+  --color-on-surface-variant: #8a8a8a;
+  --color-primary: #0DB152;
+  --color-primary-container: #3DD97A;
+  --color-on-primary: #ffffff;
+  --color-on-primary-fixed: #ffffff;
+  --color-primary-fixed: #86EDAE;
+  --color-secondary: #7b93c0;
+  --color-secondary-container: #1e2d4a;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #bacffe;
+  --color-tertiary: #f76780;
+  --color-tertiary-container: #4a1926;
+  --color-on-tertiary: #ffffff;
+  --color-outline: #333333;
+  --color-outline-variant: #222222;
+  --color-error: #ff5449;
+  --color-wechat-green: #95ec69;
+  --color-wechat-bg: #1a1a1a;
+  --color-wechat-header: #1a1a1a;
+  --color-wechat-input-bg: #111111;
+}
+
+@layer base {
+  h1, h2, h3 {
+    font-family: 'Noto Serif SC', 'Songti SC', serif;
+  }
+
+  body {
+    font-family: 'DM Sans', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    background-color: var(--color-surface);
+    color: var(--color-on-surface);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@keyframes typing-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes float1 {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(-2deg); }
+}
+
+@keyframes float2 {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-6px) rotate(2deg); }
+}
+
+@keyframes float3 {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-4px) scale(1.15); }
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+@keyframes caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes float-phone {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes float-chat-left {
+  0%, 100% { transform: translateY(0px) translateX(0px); }
+  50% { transform: translateY(-6px) translateX(-2px); }
+}
+
+@keyframes float-chat-right {
+  0%, 100% { transform: translateY(0px) translateX(0px); }
+  50% { transform: translateY(-10px) translateX(3px); }
+}
+
+@keyframes pulse-halo {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.03); opacity: 0.5; }
+}
+
+@keyframes spin-star {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.7; }
+  50% { transform: scale(1.2) rotate(15deg); opacity: 1; }
+}
+
+@keyframes draw-1 {
+  0%, 5%   { stroke-dashoffset: 100; opacity: 0; }
+  10%      { opacity: 1; }
+  20%, 85% { stroke-dashoffset: 0; opacity: 1; }
+  95%, 100%{ stroke-dashoffset: 100; opacity: 0; }
+}
+
+@keyframes draw-2 {
+  0%, 15%  { stroke-dashoffset: 100; opacity: 0; }
+  20%      { opacity: 1; }
+  30%, 85% { stroke-dashoffset: 0; opacity: 1; }
+  95%, 100%{ stroke-dashoffset: 100; opacity: 0; }
+}
+
+@keyframes draw-3 {
+  0%, 25%  { stroke-dashoffset: 100; opacity: 0; }
+  30%      { opacity: 1; }
+  40%, 85% { stroke-dashoffset: 0; opacity: 1; }
+  95%, 100%{ stroke-dashoffset: 100; opacity: 0; }
+}
+
+@keyframes pop-in {
+  0%, 35%  { transform: scale(0); opacity: 0; }
+  45%, 85% { transform: scale(1); opacity: 1; }
+  95%, 100%{ transform: scale(0); opacity: 0; }
+}
+
+@keyframes float-up {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-8px); }
+}
+
+@keyframes float-down {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(6px); }
+}
+
+@keyframes btn-glow {
+  0%, 100% { box-shadow: 0 8px 20px rgba(13, 177, 82, 0.15); }
+  50% { box-shadow: 0 8px 32px rgba(13, 177, 82, 0.4); }
+}
