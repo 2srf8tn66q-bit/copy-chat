@@ -67,6 +67,10 @@ export default function CharacterEditPage() {
     for (let i = 0; i < keys.length - 1; i++) {
       target = target[keys[i]] as Record<string, unknown>;
     }
+    // avgMessageLength must stay numeric
+    if (path === 'voiceFingerprint.habits.avgMessageLength') {
+      value = Number(value) || 0;
+    }
     target[keys[keys.length - 1]] = value;
     setCharacter(updated);
   }, [character]);
@@ -120,7 +124,7 @@ export default function CharacterEditPage() {
     try {
       updateCharacter(id, character);
       await saveCharacter(character);
-      navigate(-1);
+      navigate('/characters');
     } catch (err) {
       console.error('保存失败:', err);
     } finally {
@@ -130,7 +134,7 @@ export default function CharacterEditPage() {
 
   // 取消
   const handleCancel = useCallback(() => {
-    navigate(-1);
+    navigate('/characters');
   }, [navigate]);
 
   // ─── 渲染辅助 ──────────────────────────────────────

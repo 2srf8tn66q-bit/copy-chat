@@ -51,6 +51,9 @@ interface FormData {
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const addConfig = useLLMStore((s) => s.addConfig);
+  const configs = useLLMStore((s) => s.configs);
+  const setConfig = useLLMStore((s) => s.setConfig);
+  const setActiveConfig = useLLMStore((s) => s.setActiveConfig);
 
   const [formData, setFormData] = useState<FormData>({
     provider: 'openai',
@@ -95,7 +98,12 @@ export default function OnboardingPage() {
       baseUrl: formData.baseUrl,
       model: formData.model,
     };
-    addConfig(config);
+    if (configs.length > 0) {
+      setConfig(0, config);
+      setActiveConfig(0);
+    } else {
+      addConfig(config);
+    }
     navigate('/import');
   };
 
@@ -247,7 +255,7 @@ export default function OnboardingPage() {
               <button
                 type="button"
                 onClick={handleTest}
-                disabled={testing || !formData.apiKey}
+                disabled={testing || (!formData.apiKey && formData.provider !== 'ollama')}
                 className="px-5 py-3 bg-surface-container-high text-on-surface rounded-lg text-sm font-medium hover:bg-surface-container-highest active:scale-[0.98] transition-all disabled:opacity-40 inline-flex items-center gap-1.5"
               >
                 {testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}

@@ -133,7 +133,13 @@ export default function ChatBubble({
           }}
         />
       )}
-      {message.content}
+      {message.type === 'image' && message.mediaUrl ? (
+        <img src={message.mediaUrl} alt={message.content || '图片'} style={{ maxWidth: '200px', maxHeight: '200px', borderRadius: '4px', display: 'block' }} />
+      ) : message.type === 'video' && message.mediaUrl ? (
+        <video src={message.mediaUrl} controls style={{ maxWidth: '200px', borderRadius: '4px', display: 'block' }} />
+      ) : (
+        message.content
+      )}
     </div>
   );
 

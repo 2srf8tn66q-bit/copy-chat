@@ -64,7 +64,7 @@ export async function sendChatMessage(config: LLMConfig, messages: ChatMessage[]
     : buildOpenAICompatibleRequest(config, messages);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
+  const timeout = setTimeout(() => controller.abort(), 120000); // 120s timeout
 
   try {
     const response = await fetch('/api/llm/proxy', {
@@ -94,7 +94,7 @@ export async function sendChatMessage(config: LLMConfig, messages: ChatMessage[]
     }
   } catch (error: unknown) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('Request timed out (60s)');
+      throw new Error('请求超时，请稍后重试');
     }
     throw error;
   } finally {

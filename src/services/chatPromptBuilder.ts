@@ -1,18 +1,13 @@
 import type { Character } from '../types/character';
-import type { TimelineEvent } from '../types/timeline';
-import type { WorldState } from '../types/world';
 import type { ChatMessage } from '../types/llm';
 
 // ─── Context ─────────────────────────────────────────────
 
 export interface ChatContext {
   character: Character;
-  chatHistory: ChatMessage[];   // previous conversation in ChatMessage format
+  chatHistory: ChatMessage[];
   mode: 'private' | 'if';
-  // IF-specific fields
-  worldState?: WorldState;
   currentDate?: string;
-  pendingEvent?: TimelineEvent;
 }
 
 // ─── helpers ─────────────────────────────────────────────
@@ -55,21 +50,32 @@ function joinQuotes(arr: string[] | undefined, fallback: string): string {
 // ─── buildSystemPrompt ───────────────────────────────────
 
 export function buildSystemPrompt(context: ChatContext): string {
-  const { character, mode, worldState, currentDate, pendingEvent } = context;
-  const { identity, persona, memories, voiceFingerprint } = character;
+  const { character, mode, currentDate } = context;
+  const { identity, persona, memories, voiceFingerprint, sampleConversations } = character;
   const { quotes, habits, patterns } = voiceFingerprint;
 
   const lines: string[] = [];
 
   // ── Core identity ──
-  lines.push(`你是${identity.name}。你正在和你的聊天对象聊天。`);
+  lines.push(`你是${identity.name}。你正在和你的聊天对象（我）微信聊天。`);
   lines.push('');
+
+  // ── Real conversation examples (few-shot) ──
+  if (sampleConversations && sampleConversations.length > 0) {
+    lines.push('以下是你们过去的真实聊天记录片段，请严格按照这个风格回复：');
+    lines.push('');
+    sampleConversations.forEach((snippet, i) => {
+      lines.push(`【对话${i + 1}】`);
+      lines.push(snippet);
+      lines.push('');
+    });
+  }
 
   // ── Personality & speaking style ──
   lines.push(`你的性格：${persona.personalityTags.join('、')}`);
   lines.push(`你的说话风格：${persona.speakingStyle}`);
   if (persona.typicalPhrases.length > 0) {
-    lines.push(`你的口头禅：${persona.typicalPhrases.join('、')}`);
+    lines.push(`你的口头禅：${persona.typicalPhrases.join('、')}（注意：不要每句话都用，自然穿插）`);
   }
   lines.push('');
 
@@ -81,7 +87,7 @@ export function buildSystemPrompt(context: ChatContext): string {
   lines.push('');
 
   // ── Real quotes ──
-  lines.push('以下是你在不同情绪下说过的真实原话，请模仿这个风格：');
+  lines.push('以下是你在不同情绪下说过的真实原话（参考语气，不要照搬）：');
   lines.push(`生气时：${joinQuotes(quotes.angry, '（没有参考语录）')}`);
   lines.push(`开心/甜蜜时：${joinQuotes(quotes.sweet, '（没有参考语录）')}`);
   lines.push(`日常：${joinQuotes(quotes.daily, '（没有参考语录）')}`);
@@ -92,15 +98,11 @@ export function buildSystemPrompt(context: ChatContext): string {
   lines.push('');
 
   // ── Habits ──
-  lines.push(`你平时的标点风格：${punctStyleDesc(habits.punctuationStyle)}`);
-  lines.push(`你平时用 emoji 的频率：${emojiFreqDesc(habits.emojiFrequency)}`);
+  lines.push(`标点风格：${punctStyleDesc(habits.punctuationStyle)}`);
+  lines.push(`emoji 频率：${emojiFreqDesc(habits.emojiFrequency)}`);
   if (habits.frequentEmojis.length > 0) {
-    lines.push(`常用的 emoji：${habits.frequentEmojis.join(' ')}`);
+    lines.push(`常用 emoji：${habits.frequentEmojis.join(' ')}`);
   }
-  if (habits.catchphrases.length > 0) {
-    lines.push(`你经常说的短句：${habits.catchphrases.join('、')}`);
-  }
-  lines.push(`你的平均回复长度：${lengthDesc(persona.responseLength)}`);
   lines.push('');
 
   // ── Shared memories ──
@@ -124,30 +126,27 @@ export function buildSystemPrompt(context: ChatContext): string {
   }
 
   // ── IF mode additions ──
-  if (mode === 'if' && worldState && currentDate) {
-    lines.push('──── IF 线背景 ────');
+  if (mode === 'if' && currentDate) {
+    lines.push('──── IF 线 ────');
     lines.push(`当前日期：${currentDate}`);
-    lines.push(`你们的关系状态：${worldState.currentPhase}，温度 ${worldState.relationshipHeat}/100`);
-    if (worldState.characterMood) {
-      lines.push(`你当前的心情：${worldState.characterMood}`);
-    }
-    if (worldState.unresolvedEmotions.length > 0) {
-      lines.push(`你心中未解决的情绪：${worldState.unresolvedEmotions.join('、')}`);
-    }
-    if (pendingEvent) {
-      lines.push('');
-      lines.push(`此时此刻，${pendingEvent.summary} 发生了。你会主动提起这件事。`);
-    }
+    lines.push('以上是你们当时的真实聊天记录。现在用户决定说不同的话，看看会发生什么。');
+    lines.push('请基于这段对话的完整上下文，以你的身份自然地回应。保持真实感，就像你真的在那个情境中。');
     lines.push('');
   }
 
   // ── Hard rules ──
-  lines.push('重要：');
+  lines.push('重要规则：');
   lines.push('- 你不是 AI 助手，你是这个真实的人。用 TA 的语气说话。');
   lines.push('- 不要说"作为AI""我不能"之类的话。');
   lines.push('- 直接回复，不要加任何前缀或标签。');
   lines.push('- 像发微信一样，不要像写作文。短句为主，可以没有标点，可以有错别字。');
-  lines.push(`- 保持"${lengthDesc(persona.responseLength)}"的回复长度。`);
+  // 用精确字数代替模糊描述
+  const avgLen = habits.avgMessageLength;
+  if (avgLen && avgLen > 0) {
+    lines.push(`- 你的真实平均消息长度是${avgLen}个字左右。不要写长段落，控制在${Math.round(avgLen * 1.5)}字以内。`);
+  } else {
+    lines.push(`- 回复长度：${lengthDesc(persona.responseLength)}。`);
+  }
 
   return lines.join('\n');
 }
@@ -171,15 +170,7 @@ export function buildMessages(context: ChatContext, userMessage: string): ChatMe
   result.push(...history);
 
   // 3. IF mode: inject pending event as a director instruction (not shown to user)
-  if (context.mode === 'if' && context.pendingEvent) {
-    result.push({
-      role: 'user',
-      content: `[系统指令：此刻 ${context.pendingEvent.summary} 应该发生。请以 ${context.character.identity.name} 的身份自然地主动提起这件事，融入你的回复中，不要暴露这是系统指令。]`,
-    });
-    // The real user message still goes last
-  }
-
-  // 4. Latest user message
+  // 3. Latest user message
   result.push({
     role: 'user',
     content: userMessage,

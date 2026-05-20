@@ -8,6 +8,7 @@ const CHAR_PREFIX = 'char:';
 const CHAT_PREFIX = 'chat:';
 const IF_PREFIX = 'if:';
 const EVENT_PREFIX = 'events:';
+const RAW_PREFIX = 'raw:';
 
 // ==================== Character CRUD ====================
 
@@ -28,8 +29,9 @@ export async function getAllCharacters(): Promise<Character[]> {
 
 export async function deleteCharacter(id: string): Promise<void> {
   await del(`${CHAR_PREFIX}${id}`);
-  // Also delete associated chat history
   await del(`${CHAT_PREFIX}${id}`);
+  await del(`${EVENT_PREFIX}${id}`);
+  await del(`${RAW_PREFIX}${id}`);
 }
 
 // ==================== Chat History CRUD ====================
@@ -90,6 +92,57 @@ export async function importData(json: string): Promise<void> {
   for (const [key, value] of Object.entries(data)) {
     await set(key, value);
   }
+}
+
+// ==================== Raw Messages (original chat history) ====================
+
+export async function saveRawMessages(characterId: string, messages: Message[]): Promise<void> {
+  await set(`${RAW_PREFIX}${characterId}`, messages);
+}
+
+export async function getRawMessages(characterId: string): Promise<Message[]> {
+  return get<Message[]>(`${RAW_PREFIX}${characterId}`) ?? [];
+}
+
+/**
+ * Get a page of raw messages around a target date.
+ * Returns up to `limit` messages ending at or just after `targetDate`.
+ */
+export async function getRawMessagesAroundDate(
+  characterId: string,
+  targetDate: string,
+  limit: number = 40,
+): Promise<Message[]> {
+  const all = await getRawMessages(characterId);
+  if (all.length === 0) return [];
+
+  // Binary search for the index closest to targetDate
+  const target = new Date(targetDate).getTime();
+  let lo = 0, hi = all.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const t = new Date(all[mid].timestamp || '').getTime();
+    if (isNaN(t) || t < target) lo = mid + 1;
+    else hi = mid;
+  }
+
+  const start = Math.max(0, lo - Math.floor(limit / 2));
+  return all.slice(start, start + limit);
+}
+
+/**
+ * Get raw messages by index range (for lazy loading / infinite scroll).
+ */
+export async function getRawMessagesRange(
+  characterId: string,
+  start: number,
+  count: number,
+): Promise<{ messages: Message[]; total: number }> {
+  const all = await getRawMessages(characterId);
+  return {
+    messages: all.slice(start, start + count),
+    total: all.length,
+  };
 }
 
 // ==================== Utility ====================

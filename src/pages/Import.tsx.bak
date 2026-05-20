@@ -10,7 +10,7 @@ import { generateFromParsedData } from '../services/profileGenerator';
 import type { GenerationResult } from '../services/profileGenerator';
 import { useLLMStore } from '../stores/llmStore';
 import { useCharacterStore } from '../stores/characterStore';
-import { saveCharacter, saveTimelineEvents, saveRawMessages } from '../services/storage';
+import { saveCharacter } from '../services/storage';
 import type { Character } from '../types/character';
 
 type Step = 'import' | 'confirm' | 'done';
@@ -31,10 +31,7 @@ export default function ImportPage() {
   const [sourceType, setSourceType] = useState<'text-paste' | 'html-upload'>('text-paste');
   const [generationResult, setGenerationResult] = useState<GenerationResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingText, setLoadingText] = useState('加载中...');
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
 
   // ─── File handling ───
 
@@ -104,11 +101,8 @@ export default function ImportPage() {
 
     setLoading(true);
     setError(null);
-    setLoadingText('正在生成性格画像...');
     try {
-      const result = await generateFromParsedData(parseResult, llmConfig, (msg) => {
-        setLoadingText(msg);
-      });
+      const result = await generateFromParsedData(parseResult, llmConfig);
       setGenerationResult(result);
       setStep('done');
     } catch (err) {
@@ -121,9 +115,7 @@ export default function ImportPage() {
   // ─── Save ───
 
   const saveCharacter_ = useCallback(async (target: 'chat' | 'edit' | 'list') => {
-    if (!generationResult || savingRef.current) return;
-    savingRef.current = true;
-    setSaving(true);
+    if (!generationResult) return;
     const character: Character = {
       id: `char_${Date.now()}`,
       ...generationResult.character,
@@ -132,25 +124,12 @@ export default function ImportPage() {
     };
     addCharacter(character);
     await saveCharacter(character);
-    // 保存原始聊天记录（IF 线回放用）
-    if (parseResult?.messages?.length) {
-      await saveRawMessages(character.id, parseResult.messages);
-    }
-    // 保存 IF 线事件
-    if (generationResult.events.length > 0) {
-      const eventsWithIds = generationResult.events.map(e => ({
-        ...e,
-        id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        status: 'pending' as const,
-      }));
-      await saveTimelineEvents(character.id, eventsWithIds);
-    }
     if (target === 'list') {
       navigate('/characters');
     } else {
       navigate(`/characters/${character.id}/${target}`);
     }
-  }, [generationResult, parseResult, sourceType, addCharacter, navigate, saving]);
+  }, [generationResult, sourceType, addCharacter, navigate]);
 
   // ─── Steps indicator ───
 
@@ -232,9 +211,13 @@ export default function ImportPage() {
                 </div>
 
                 <div className="mt-6 flex flex-col gap-4">
-                  <div className="text-xs text-on-surface-variant leading-relaxed space-y-1">
-                    <p className="text-emerald-700 font-medium">支持：文字消息、时间、表情符号</p>
-                    <p className="text-on-surface-variant/60">不支持图片和视频（显示为占位符）</p>
+                  <div className="bg-surface-container-high/50 rounded-lg p-4 text-xs text-on-surface-variant leading-relaxed">
+                    <strong className="text-emerald-800 block mb-1">支持的内容：</strong>
+                    文字消息、时间、表情符号
+                  </div>
+                  <div className="bg-tertiary/5 rounded-lg p-4 text-xs leading-relaxed text-tertiary">
+                    <strong className="block mb-1">不支持：</strong>
+                    图片和视频无法解析（会显示为 [图片] [视频]）
                   </div>
                   <button
                     onClick={handleParse}
@@ -258,7 +241,6 @@ export default function ImportPage() {
                   </div>
                 </div>
 
-                <label className="block text-sm font-semibold text-on-surface-variant mb-2">聊天文件</label>
                 <div
                   className={`flex-grow flex flex-col border-2 border-dashed rounded-xl bg-surface-container-lowest/50 hover:bg-surface-container-lowest transition-colors cursor-pointer p-8 group overflow-y-auto ${
                     selectedFiles.length > 0 ? 'items-start justify-start' : 'items-center justify-center text-center'
@@ -270,25 +252,19 @@ export default function ImportPage() {
                 >
                   {selectedFiles.length > 0 ? (
                     <div className="w-full text-left" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs font-medium text-on-surface-variant">已选择 {selectedFiles.length} 个文件</p>
-                        <button onClick={() => fileInputRef.current?.click()} className="text-[10px] text-primary hover:underline">重新选择</button>
-                      </div>
+                      <p className="text-sm font-semibold text-on-surface-variant mb-3">已选择 {selectedFiles.length} 个文件</p>
                       <div className="max-h-40 overflow-y-auto space-y-2">
                         {selectedFiles.map((f, i) => (
-                          <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2.5 bg-surface-container border border-outline-variant/50">
-                            <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 bg-primary/10">
-                              <FileText size={15} className="text-primary" />
+                          <div key={i} className="flex items-center gap-3 rounded-xl px-4 py-3 border shadow-sm" style={{ backgroundColor: '#d4b896', borderColor: '#c4a67a' }}>
+                            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: 'rgba(0,0,0,0.08)' }}>
+                              <FileText size={18} style={{ color: '#5c3d1e' }} />
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm text-on-surface truncate">{f.name}</p>
-                              <p className="text-[10px] text-on-surface-variant mt-0.5">{(f.size / 1024).toFixed(0)} KB</p>
-                            </div>
+                            <span className="text-sm truncate flex-1" style={{ color: '#3e2a14' }}>{f.name}</span>
                             <button
                               onClick={() => setSelectedFiles(prev => prev.filter((_, idx) => idx !== i))}
-                              className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-error/10 hover:text-error transition-colors"
+                              className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-outline hover:bg-error/10 hover:text-error transition-colors"
                             >
-                              <X size={13} />
+                              <X size={15} />
                             </button>
                           </div>
                         ))}
@@ -322,16 +298,13 @@ export default function ImportPage() {
                 <input ref={fileInputRef} type="file" accept=".html,.htm" multiple className="hidden" onChange={(e) => { if (e.target.files) handleFileSelect(e.target.files); }} />
 
                 <div className="mt-6 flex flex-col gap-4">
-                  <div className="text-xs text-on-surface-variant leading-relaxed space-y-1">
-                    <p className="text-emerald-700 font-medium">支持：文字、图片、视频全部内容</p>
+                  <div className="bg-surface-container-high/50 rounded-lg p-4 text-xs text-on-surface-variant leading-relaxed">
+                    <strong className="text-emerald-800 block mb-1">支持的内容：</strong>
+                    文字消息、图片、视频全部内容，自动解析图片和视频的含义
                   </div>
-                  <div className="flex items-start gap-2.5 rounded-lg px-3 py-2.5 bg-emerald-500/8 border border-emerald-500/20">
-                    <span className="text-emerald-600 mt-0.5 shrink-0">↗</span>
-                    <p className="text-xs text-on-surface-variant leading-relaxed">
-                      导出前需先安装{' '}
-                      <a href="https://github.com/hicccc77/WeFlow" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-700 underline underline-offset-2 hover:opacity-80">WeFlow</a>
-                      {' '}，将微信聊天记录导出为 HTML 文件夹后再上传
-                    </p>
+                  <div className="bg-tertiary/5 rounded-lg p-4 text-xs leading-relaxed text-tertiary">
+                    <strong className="block mb-1">需要导出工具：</strong>
+                    请先下载 <a href="https://github.com/hicccc77/WeFlow" target="_blank" rel="noopener noreferrer" className="underline font-semibold hover:opacity-80">WeFlow</a> 将微信聊天记录导出为 HTML 文件，然后把导出的文件夹拖到上方区域即可
                   </div>
                   <button
                     onClick={handleParse}
@@ -356,21 +329,21 @@ export default function ImportPage() {
 
             <div className="bg-surface-container-lowest rounded-xl p-6 border border-outline-variant">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div className="text-center p-3 rounded-lg bg-surface-container-low flex flex-col">
-                  <p className="text-2xl font-bold text-primary flex-1 flex items-end justify-center">{parseResult.totalMessages}</p>
-                  <p className="text-xs text-on-surface-variant mt-1">消息数</p>
+                <div className="text-center p-3 rounded-lg bg-surface-container-low">
+                  <p className="text-2xl font-bold text-primary">{parseResult.totalMessages}</p>
+                  <p className="text-xs text-on-surface-variant">消息数</p>
                 </div>
-                <div className="text-center p-3 rounded-lg bg-surface-container-low flex flex-col">
-                  <p className="text-base font-bold text-secondary flex-1 flex items-end justify-center">{parseResult.participants.other}</p>
-                  <p className="text-xs text-on-surface-variant mt-1">对方昵称</p>
+                <div className="text-center p-3 rounded-lg bg-surface-container-low">
+                  <p className="text-2xl font-bold text-secondary">{parseResult.participants.other}</p>
+                  <p className="text-xs text-on-surface-variant">对方昵称</p>
                 </div>
-                <div className="text-center p-3 rounded-lg bg-surface-container-low flex flex-col">
-                  <p className="text-sm font-bold text-on-surface flex-1 flex items-end justify-center">{parseResult.startDate || '未知'}</p>
-                  <p className="text-xs text-on-surface-variant mt-1">起始日期</p>
+                <div className="text-center p-3 rounded-lg bg-surface-container-low">
+                  <p className="text-sm font-bold text-on-surface">{parseResult.startDate || '未知'}</p>
+                  <p className="text-xs text-on-surface-variant">起始日期</p>
                 </div>
-                <div className="text-center p-3 rounded-lg bg-surface-container-low flex flex-col">
-                  <p className="text-sm font-bold text-on-surface flex-1 flex items-end justify-center">{parseResult.endDate || '未知'}</p>
-                  <p className="text-xs text-on-surface-variant mt-1">结束日期</p>
+                <div className="text-center p-3 rounded-lg bg-surface-container-low">
+                  <p className="text-sm font-bold text-on-surface">{parseResult.endDate || '未知'}</p>
+                  <p className="text-xs text-on-surface-variant">结束日期</p>
                 </div>
               </div>
 
@@ -400,7 +373,7 @@ export default function ImportPage() {
                   disabled={loading || !getActiveConfig()}
                   className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-primary text-on-primary flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  {loading ? <><Loader2 size={16} className="animate-spin" /> {loadingText}</> : <><FileText size={16} /> 生成画像 <ChevronRight size={14} /></>}
+                  {loading ? <><Loader2 size={16} className="animate-spin" /> 正在生成画像...</> : <><FileText size={16} /> 生成画像 <ChevronRight size={14} /></>}
                 </button>
               </div>
             </div>
@@ -451,11 +424,11 @@ export default function ImportPage() {
               </div>
 
               <div className="flex gap-3">
-                <button disabled={saving} onClick={() => saveCharacter_('edit')} className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                  {saving ? '保存中...' : '查看画像（可编辑）'}
+                <button onClick={() => saveCharacter_('edit')} className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors">
+                  查看画像（可编辑）
                 </button>
-                <button disabled={saving} onClick={() => saveCharacter_('chat')} className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-primary text-on-primary disabled:opacity-50 disabled:cursor-not-allowed">
-                  {saving ? '保存中...' : '确认并开始聊天'}
+                <button onClick={() => saveCharacter_('chat')} className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-primary text-on-primary">
+                  确认并开始聊天
                 </button>
               </div>
             </div>

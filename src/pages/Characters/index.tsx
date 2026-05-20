@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, User, Users, Settings } from 'lucide-react';
-import { getAllCharacters } from '../../services/storage';
+import { Plus, Search, User, Users, Settings, Trash2 } from 'lucide-react';
+import { getAllCharacters, deleteCharacter } from '../../services/storage';
 import { useCharacterStore } from '../../stores/characterStore';
 import NavBar from '../../components/layout/NavBar';
 import type { Character } from '../../types/character';
@@ -9,6 +9,7 @@ import type { Character } from '../../types/character';
 export default function CharactersPage() {
   const navigate = useNavigate();
   const addCharacter = useCharacterStore((s) => s.addCharacter);
+  const removeCharacter = useCharacterStore((s) => s.removeCharacter);
 
   const [characters, setCharacters] = useState<Character[]>([]);
   const [search, setSearch] = useState('');
@@ -40,15 +41,24 @@ export default function CharactersPage() {
               每个人都是根据真实聊天记录生成的。
             </p>
           </div>
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索角色..."
-              className="pl-9 pr-4 py-2 bg-surface-container-low rounded-md text-sm outline-none w-56 md:w-64 focus:ring-1 focus:ring-primary text-on-surface placeholder:text-outline"
-            />
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索角色..."
+                className="pl-9 pr-4 py-2 bg-surface-container-low rounded-md text-sm outline-none w-56 md:w-64 focus:ring-1 focus:ring-primary text-on-surface placeholder:text-outline"
+              />
+            </div>
+            <button
+              onClick={() => navigate('/import')}
+              className="inline-flex items-center gap-1.5 bg-primary text-on-primary px-4 py-2 rounded-md text-sm font-medium hover:scale-[1.02] active:scale-95 transition-all"
+            >
+              <Plus size={14} />
+              导入角色
+            </button>
           </div>
         </header>
 
@@ -74,7 +84,11 @@ export default function CharactersPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {filtered.map((char) => (
-                <CharacterCard key={char.id} character={char} onNavigate={navigate} />
+                <CharacterCard key={char.id} character={char} onNavigate={navigate} onDelete={async (id) => {
+                  await deleteCharacter(id);
+                  removeCharacter(id);
+                  setCharacters(prev => prev.filter(c => c.id !== id));
+                }} />
               ))}
             </div>
           )}
@@ -115,7 +129,7 @@ export default function CharactersPage() {
   );
 }
 
-function CharacterCard({ character, onNavigate }: { character: Character; onNavigate: (path: string) => void }) {
+function CharacterCard({ character, onNavigate, onDelete }: { character: Character; onNavigate: (path: string) => void; onDelete: (id: string) => void }) {
   return (
     <div className="bg-surface-container-lowest p-5 rounded-xl border border-transparent hover:border-outline-variant transition-colors">
       <div className="flex items-center gap-3.5">
@@ -126,12 +140,18 @@ function CharacterCard({ character, onNavigate }: { character: Character; onNavi
             <User size={24} className="text-outline opacity-40" />
           )}
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h4 className="font-bold text-base text-on-surface">{character.identity.name}</h4>
           <p className="text-xs text-outline">
             {character.sourceType === 'text-paste' ? '文本导入' : character.sourceType === 'html-upload' ? '文件导入' : '手动创建'}
           </p>
         </div>
+        <button
+          onClick={() => { if (confirm(`确定删除「${character.identity.name}」？`)) onDelete(character.id); }}
+          className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-outline hover:bg-error/10 hover:text-error transition-colors"
+        >
+          <Trash2 size={15} />
+        </button>
       </div>
       <div className="mt-4 flex gap-2">
         <button

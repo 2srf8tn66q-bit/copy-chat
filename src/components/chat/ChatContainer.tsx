@@ -157,7 +157,7 @@ export default function ChatContainer({
         }}
       >
         <div className="py-3">
-          {messages.map((msg, i) => (
+          {(messages ?? []).map((msg, i) => (
             <ChatBubble
               key={msg.id}
               message={msg}

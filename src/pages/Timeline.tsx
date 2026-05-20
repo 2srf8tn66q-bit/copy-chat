@@ -41,6 +41,7 @@ export default function TimelinePage() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [worldRule, setWorldRule] = useState<WorldRule>('free');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [newEvent, setNewEvent] = useState<ManualEventForm>({
     date: '',
     summary: '',
@@ -64,6 +65,7 @@ export default function TimelinePage() {
 
     loadCharacter().then((char) => {
       if (char) setCharacter(char as Character);
+      setLoading(false);
     });
 
     // Load persisted timeline events
@@ -128,6 +130,14 @@ export default function TimelinePage() {
 
   // ─── 渲染 ──────────────────────────────────────────
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center" style={{ backgroundColor: 'var(--color-surface)' }}>
+        <p style={{ color: 'var(--color-on-surface-variant)' }}>加载中...</p>
+      </div>
+    );
+  }
+
   if (!character) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: 'var(--color-surface)' }}>
@@ -149,7 +159,7 @@ export default function TimelinePage() {
       <div className="sticky top-0 z-10 border-b" style={{ borderColor: 'var(--color-outline-variant)', backgroundColor: 'var(--color-surface)' }}>
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
           <button
-            onClick={() => navigate(`/characters/${id}/edit`)}
+            onClick={() => navigate('/characters')}
             className="p-1 rounded hover:opacity-70 transition-opacity"
             style={{ color: 'var(--color-on-surface)' }}
           >

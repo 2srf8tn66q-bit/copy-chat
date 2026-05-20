@@ -44,6 +44,7 @@ export default function ChatPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [noLLM, setNoLLM] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // Ref to avoid stale closures in the send handler
   const messagesRef = useRef<Message[]>(messages);
@@ -52,6 +53,7 @@ export default function ChatPage() {
   // ── Load character & chat history ──
   useEffect(() => {
     if (!characterId) return;
+    setLoading(true);
 
     const loadCharacter = async () => {
       // Try store first, then IndexedDB
@@ -63,21 +65,28 @@ export default function ChatPage() {
       return char;
     };
 
-    loadCharacter().then((char) => {
-      if (!char) return;
-      setCharacter(char as Character);
+    loadCharacter()
+      .then((char) => {
+        if (!char) return;
+        setCharacter(char as Character);
 
-      // Check LLM config
-      const config = getActiveConfig();
-      if (!config) {
-        setNoLLM(true);
-      }
+        // Check LLM config
+        const config = getActiveConfig();
+        if (!config) {
+          setNoLLM(true);
+        }
 
-      // Load chat history from IndexedDB
-      getChatHistory((char as Character).id).then((history) => {
-        setMessages(history);
+        // Load chat history from IndexedDB
+        getChatHistory((char as Character).id).then((history) => {
+          setMessages(Array.isArray(history) ? history : []);
+        });
+      })
+      .catch((err) => {
+        console.error('Failed to load character:', err);
+      })
+      .finally(() => {
+        setLoading(false);
       });
-    });
   }, [characterId, getCharacter, addCharacter, getActiveConfig]);
 
   // ── Save to IndexedDB whenever messages change ──
@@ -120,8 +129,8 @@ export default function ChatPage() {
       setIsTyping(true);
 
       try {
-        // 2. Build chat history in ChatMessage format
-        const chatHistory: ChatMessage[] = updatedMessages.map(messageToChatMessage);
+        // 2. Build chat history (BEFORE current message, buildMessages adds it)
+        const chatHistory: ChatMessage[] = messagesRef.current.map(messageToChatMessage);
 
         // 3. Build messages for LLM
         const llmMessages = buildMessages(
@@ -148,6 +157,15 @@ export default function ChatPage() {
     },
     [character, characterId, getActiveConfig],
   );
+
+  // ── Loading ──
+  if (loading) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center" style={{ backgroundColor: '#EDEDED' }}>
+        <p style={{ color: '#999' }}>加载中...</p>
+      </div>
+    );
+  }
 
   // ── No character found ──
   if (!character) {

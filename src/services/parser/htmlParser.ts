@@ -209,6 +209,166 @@ function identifyParticipants(
   return { self: '我', other: senders[0] || '对方' };
 }
 
+// ─── WeFlow HTML 解析 ─────────────────────────────────────
+
+interface WeFlowItem {
+  i: number;
+  t: number;
+  s: number;
+  a: string;
+  b: string;
+  p: string;
+  r?: string;
+}
+
+function parseWeFlowData(htmlContent: string): WeFlowItem[] | null {
+  const match = htmlContent.match(/window\.WEFLOW_DATA\s*=\s*\[/);
+  if (!match) return null;
+
+  try {
+    const start = htmlContent.indexOf('window.WEFLOW_DATA');
+    const bracketStart = htmlContent.indexOf('[', start);
+    let depth = 0;
+    let bracketEnd = bracketStart;
+    for (let i = bracketStart; i < htmlContent.length; i++) {
+      if (htmlContent[i] === '[') depth++;
+      if (htmlContent[i] === ']') depth--;
+      if (depth === 0) {
+        bracketEnd = i + 1;
+        break;
+      }
+    }
+    const jsonStr = htmlContent.substring(bracketStart, bracketEnd);
+    return JSON.parse(jsonStr) as WeFlowItem[];
+  } catch {
+    return null;
+  }
+}
+
+function extractWxidFromAvatar(avatarHtml: string): string {
+  const m = avatarHtml.match(/wxid_[a-z0-9_]+/);
+  return m ? m[0] : '';
+}
+
+function extractTextFromHtml(html: string): string {
+  const textMatch = html.match(/<div class="message-text">([\s\S]*?)<\/div>/);
+  if (textMatch) {
+    return textMatch[1].replace(/<[^>]+>/g, '').trim();
+  }
+  return html.replace(/<[^>]+>/g, '').trim();
+}
+
+function extractTimeFromWeFlowBody(bodyHtml: string): string {
+  const m = bodyHtml.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+  return m ? m[1] : '';
+}
+
+function extractContactName(htmlContent: string): string {
+  // Try <h1 class="title"> first
+  const m = htmlContent.match(/<h1 class="title">([^<]+)<\/h1>/);
+  if (m) return m[1].trim().replace(/\s*-\s*聊天记录$/, '');
+  // Fallback to <title>
+  const m2 = htmlContent.match(/<title>([^<]+)<\/title>/);
+  if (m2) return m2[1].trim().replace(/\s*-\s*聊天记录$/, '');
+  return '';
+}
+
+function parseWeFlowHTML(
+  items: WeFlowItem[],
+  fileMap: Map<string, File>,
+  contactName?: string
+): HTMLParseResult {
+  const emptyResult: HTMLParseResult = {
+    messages: [],
+    participants: { self: '我', other: '对方' },
+    startDate: '',
+    endDate: '',
+    totalMessages: 0,
+    mediaCount: { images: 0, videos: 0 },
+    mediaFiles: [],
+  };
+
+  // Identify participants by wxid
+  const wxidSet = new Set<string>();
+  for (const item of items) {
+    const wxid = extractWxidFromAvatar(item.a);
+    if (wxid) wxidSet.add(wxid);
+  }
+  const wxids = [...wxidSet];
+  // Use s===1 as self if available, otherwise second wxid is self
+  const hasSenderFlag = items.some((item) => item.s === 1);
+  let selfWxid: string;
+  let otherWxid: string;
+  if (hasSenderFlag) {
+    const selfItem = items.find((item) => item.s === 1);
+    selfWxid = selfItem ? extractWxidFromAvatar(selfItem.a) : wxids[1] || wxids[0];
+    otherWxid = wxids.find((w) => w !== selfWxid) || wxids[0];
+  } else {
+    // s all 0: treat first wxid as other, second as self
+    otherWxid = wxids[0] || '';
+    selfWxid = wxids[1] || wxids[0] || '';
+  }
+
+  const displayName = contactName || otherWxid;
+
+  const allMediaFiles: HTMLMediaFile[] = [];
+  const messages: Message[] = [];
+
+  for (const item of items) {
+    const wxid = extractWxidFromAvatar(item.a);
+    const isSelf = wxid === selfWxid || (hasSenderFlag && item.s === 1);
+    const time = extractTimeFromWeFlowBody(item.b);
+    const text = extractTextFromHtml(item.b);
+
+    if (!text) continue;
+    if (isSystemMessage(text)) continue;
+
+    let msgType: Message['type'] = 'text';
+    if (item.b.includes('message-media image') || text === '[图片]') {
+      msgType = 'image';
+    } else if (item.b.includes('message-media video') || text === '[视频]') {
+      msgType = 'video';
+    }
+
+    if (msgType === 'image' || msgType === 'video') {
+      const mediaSrcMatch = item.b.match(/src="([^"]+)"/);
+      if (mediaSrcMatch) {
+        const filename = getFilenameFromPath(mediaSrcMatch[1]);
+        const file = fileMap.get(filename) || fileMap.get(mediaSrcMatch[1]);
+        const mediaFile: HTMLMediaFile = {
+          id: generateId(),
+          type: msgType,
+          filename,
+          blob: file,
+        };
+        allMediaFiles.push(mediaFile);
+      }
+    }
+
+    messages.push({
+      id: generateId(),
+      sender: isSelf ? 'user' : 'character',
+      content: text,
+      timestamp: time,
+      type: msgType,
+    });
+  }
+
+  const images = messages.filter((m) => m.type === 'image').length;
+  const videos = messages.filter((m) => m.type === 'video').length;
+  const timestamps = messages.map((m) => m.timestamp).filter(Boolean).sort();
+
+  return {
+    messages,
+    participants: { self: '我', other: displayName },
+    startDate: timestamps[0]?.substring(0, 10) || '',
+    endDate: timestamps[timestamps.length - 1]?.substring(0, 10) || '',
+    totalMessages: messages.length,
+    mediaCount: { images, videos },
+    mediaFiles: allMediaFiles,
+  };
+}
+
 // ─── 将 Blob/File 转为 dataUrl ────────────────────────────
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
@@ -240,7 +400,14 @@ export async function parseHTMLChat(
     return emptyResult;
   }
 
-  // 使用 DOMParser 解析 HTML
+  // 先检测 WeFlow 格式（window.WEFLOW_DATA）
+  const weflowItems = parseWeFlowData(htmlContent);
+  if (weflowItems && weflowItems.length > 0) {
+    const contactName = extractContactName(htmlContent);
+    return parseWeFlowHTML(weflowItems, fileMap, contactName);
+  }
+
+  // 使用 DOMParser 解析 HTML（WeChatExporter 格式）
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlContent, 'text/html');
 

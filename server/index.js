@@ -3,8 +3,12 @@
 // Port 3001 (matched by vite.config.ts proxy)
 
 import http from 'node:http';
+import { writeFileSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 const PORT = 3001;
+const SNAPSHOT_PATH = join(homedir(), 'Desktop', 'copychat-snapshot.json');
 
 /**
  * Read the full request body as a string.
@@ -116,6 +120,33 @@ const server = http.createServer(async (req, res) => {
   // Route: POST /api/llm/proxy
   if (req.method === 'POST' && url.pathname === '/api/llm/proxy') {
     await handleProxy(req, res);
+    return;
+  }
+
+  // Route: POST /api/data/snapshot — save app data to file
+  if (req.method === 'POST' && url.pathname === '/api/data/snapshot') {
+    try {
+      const body = await readBody(req);
+      writeFileSync(SNAPSHOT_PATH, body, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // Route: GET /api/data/snapshot — return saved snapshot
+  if (req.method === 'GET' && url.pathname === '/api/data/snapshot') {
+    try {
+      const data = readFileSync(SNAPSHOT_PATH, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(data);
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'No snapshot yet' }));
+    }
     return;
   }
 

@@ -49,4 +49,6 @@ export interface Character {
   };
   createdAt: string;
   sourceType: 'text-paste' | 'html-upload' | 'manual';
+  // 真实对话片段（few-shot 示例）
+  sampleConversations?: string[];
 }
