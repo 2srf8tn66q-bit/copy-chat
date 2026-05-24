@@ -24,6 +24,10 @@ export interface GenerationResult {
   /** 提取失败（重试用尽后仍失败）的季度标签，例如 ["2025-Q3", "2026-Q1"]。
    *  UI 可用此提示用户重新生成。 */
   failedSegments: string[];
+  /** 主画像生成失败时记录原因（重试用尽后仍失败 = 非 null）。
+   *  失败时 character 走 defaultCharacter，identity/persona/voiceFingerprint 大半为空。
+   *  UI 应优先显示这个失败 —— 比 segment 失败更严重。 */
+  mainProfileError: string | null;
 }
 
 export type ProgressCallback = (msg: string) => void;
@@ -637,7 +641,12 @@ export async function generateFromParsedData(
   llmConfig: LLMConfig,
   onProgress?: ProgressCallback,
 ): Promise<GenerationResult> {
-  const defaultResult: GenerationResult = { character: defaultCharacter(), events: [], failedSegments: [] };
+  const defaultResult: GenerationResult = {
+    character: defaultCharacter(),
+    events: [],
+    failedSegments: [],
+    mainProfileError: null,
+  };
   defaultResult.character.identity.name = parseResult.participants.other;
 
   if (parseResult.messages.length === 0) return defaultResult;
@@ -656,7 +665,29 @@ export async function generateFromParsedData(
 
   try {
     const profileMessages = buildProfilePrompt(parseResult, candidateQuotes);
-    const profileResponse = await sendChatMessage(llmConfig, profileMessages);
+    // 主画像调用加重试，覆盖 429 / 瞬时网络抽风。
+    // contentFilter 这种"确定性拒绝"重试也没用，但成本低，先试再说。
+    const PROFILE_RETRY_DELAYS = [800, 2000];  // 重试 2 次
+    let profileResponse = '';
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt <= PROFILE_RETRY_DELAYS.length; attempt++) {
+      try {
+        profileResponse = await sendChatMessage(llmConfig, profileMessages);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (attempt < PROFILE_RETRY_DELAYS.length) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `[profileGenerator] 主画像 attempt ${attempt + 1} 失败，` +
+            `${PROFILE_RETRY_DELAYS[attempt]}ms 后重试: ${msg}`,
+          );
+          await new Promise((r) => setTimeout(r, PROFILE_RETRY_DELAYS[attempt]));
+        }
+      }
+    }
+    if (lastErr) throw lastErr;
     const parsed = safeParseJSON<Record<string, unknown> | null>(profileResponse, null);
 
     if (parsed) {
@@ -733,6 +764,8 @@ export async function generateFromParsedData(
   } catch (error) {
     console.error('画像生成失败，使用兜底数据:', error);
     character.voiceFingerprint.quotes = fallbackQuotes;
+    // 把失败原因记录下来传给 UI，让用户看到具体出错信息（contentFilter / 限流 / 网络等）
+    defaultResult.mainProfileError = error instanceof Error ? error.message : String(error);
   }
 
   // 覆盖 messageStyle
@@ -814,5 +847,5 @@ export async function generateFromParsedData(
   onProgress?.('正在提取对话片段...');
   character.sampleConversations = extractSampleConversations(parseResult.messages);
 
-  return { character, events: allEvents, failedSegments };
+  return { character, events: allEvents, failedSegments, mainProfileError: defaultResult.mainProfileError };
 }

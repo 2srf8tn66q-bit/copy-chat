@@ -207,9 +207,23 @@ export default function ImportPage() {
 
         {/* Error */}
         {error && (
-          <div className="mb-6 p-4 rounded-lg flex items-center gap-2 bg-error/10 text-error max-w-2xl mx-auto">
-            <AlertCircle size={18} className="shrink-0" />
-            <span className="text-sm">{error}</span>
+          <div className="mb-6 p-4 rounded-lg flex items-start gap-2 bg-error/10 text-error max-w-2xl mx-auto">
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+            <div className="text-sm flex-1 min-w-0">
+              <span className="whitespace-pre-wrap">{error}</span>
+              {/* contentFilter 特殊指引：humanizeApiError 输出会含"内容审核"四字 */}
+              {error.includes('内容审核') && (
+                <div className="mt-3 pt-3 border-t border-error/30 flex items-center gap-3">
+                  <span className="text-xs opacity-80">建议到设置页换一个对情绪话题更宽容的 LLM。</span>
+                  <button
+                    onClick={() => navigate('/settings')}
+                    className="text-xs px-3 py-1 rounded bg-error/20 hover:bg-error/30 transition-colors whitespace-nowrap"
+                  >
+                    去设置 →
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -435,6 +449,34 @@ export default function ImportPage() {
               </h1>
               <p className="mt-3 text-base text-white/55">画像已生成，可以开始对话了。</p>
             </header>
+
+            {/* 主画像失败警告 — 比 segment 失败严重得多 */}
+            {generationResult.mainProfileError && (
+              <div
+                className="mb-6 rounded-lg p-4 flex items-start gap-3"
+                style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.10)',
+                  border: '1px solid rgba(239, 68, 68, 0.30)',
+                }}
+              >
+                <AlertCircle size={16} className="shrink-0 mt-0.5" style={{ color: '#ff8585' }} />
+                <div className="text-sm leading-relaxed flex-1 min-w-0">
+                  <p className="text-white/95 mb-1 font-medium">主画像生成失败，identity / persona 等字段为空</p>
+                  <p className="text-white/55 text-xs whitespace-pre-wrap">{generationResult.mainProfileError}</p>
+                  {generationResult.mainProfileError.includes('内容审核') && (
+                    <div className="mt-3 pt-3 border-t border-white/10 flex items-center gap-3">
+                      <span className="text-xs text-white/70">contentFilter 拒绝是 LLM 策略决定的，重试也没用。请换 Claude / OpenAI / Kimi。</span>
+                      <button
+                        onClick={() => navigate('/settings')}
+                        className="text-xs px-3 py-1 rounded bg-white/10 hover:bg-white/15 transition-colors whitespace-nowrap text-white/90"
+                      >
+                        去设置 →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 失败 segment 警告 — 部分季度 LLM 提取失败时显示 */}
             {generationResult.failedSegments && generationResult.failedSegments.length > 0 && (
