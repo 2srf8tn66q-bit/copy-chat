@@ -24,17 +24,19 @@ const PROVIDER_ICONS: Record<string, string> = {
 
 // 默认 base URL + model ID — 跟 Settings.tsx 保持一致
 const PROVIDER_META: Record<string, { baseUrl: string; model: string; label: string; color: string; desc: string }> = {
-  openai:  { baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.5', label: 'OpenAI', color: '#10a37f', desc: 'GPT-5.5' },
-  kimi:    { baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6', label: 'Kimi', color: '#6366f1', desc: 'K2.6' },
-  zhipu:   { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', label: '智谱', color: '#3b82f6', desc: 'GLM-5' },
-  claude:  { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-6', label: 'Claude', color: '#d97706', desc: 'Sonnet 4.6' },
-  aliyun:  { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max-latest', label: '阿里云', color: '#f97316', desc: 'Qwen Max' },
-  minimax: { baseUrl: 'https://api.minimax.io/v1', model: 'MiniMax-M2.7', label: 'MiniMax', color: '#6366f1', desc: 'M2.7' },
-  ollama:  { baseUrl: 'http://localhost:11434/v1', model: 'llama4:scout', label: 'Ollama', color: '#64748b', desc: '本地模型' },
-  custom:  { baseUrl: '', model: '', label: '自定义', color: '#6d7b6d', desc: '兼容 OpenAI 格式' },
+  openai:   { baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.5', label: 'OpenAI', color: '#10a37f', desc: 'GPT-5.5' },
+  kimi:     { baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6', label: 'Kimi', color: '#6366f1', desc: 'K2.6' },
+  zhipu:    { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', label: '智谱', color: '#3b82f6', desc: 'GLM-5' },
+  claude:   { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-6', label: 'Claude', color: '#d97706', desc: 'Sonnet 4.6' },
+  aliyun:   { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max-latest', label: '阿里云', color: '#f97316', desc: 'Qwen Max' },
+  minimax:  { baseUrl: 'https://api.minimax.io/v1', model: 'MiniMax-M2.7', label: 'MiniMax', color: '#6366f1', desc: 'M2.7' },
+  deepseek: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-pro', label: 'DeepSeek', color: '#4d6bfe', desc: 'V4 Pro' },
+  mimo:     { baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', label: '小米 MiMo', color: '#ff6700', desc: 'V2.5 Pro' },
+  ollama:   { baseUrl: 'http://localhost:11434/v1', model: 'llama4:scout', label: 'Ollama', color: '#64748b', desc: '本地模型' },
+  custom:   { baseUrl: '', model: '', label: '自定义', color: '#6d7b6d', desc: '兼容 OpenAI 格式' },
 };
 
-const PROVIDER_OPTIONS: LLMProvider[] = ['openai', 'kimi', 'zhipu', 'claude', 'aliyun', 'minimax', 'ollama', 'custom'];
+const PROVIDER_OPTIONS: LLMProvider[] = ['openai', 'kimi', 'zhipu', 'claude', 'aliyun', 'minimax', 'deepseek', 'mimo', 'ollama', 'custom'];
 
 const STEPS = [
   { num: 1, label: '配置 AI' },

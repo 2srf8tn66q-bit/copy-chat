@@ -1,4 +1,4 @@
-export type LLMProvider = 'openai' | 'kimi' | 'zhipu' | 'claude' | 'aliyun' | 'minimax' | 'ollama' | 'custom';
+export type LLMProvider = 'openai' | 'kimi' | 'zhipu' | 'claude' | 'aliyun' | 'minimax' | 'deepseek' | 'mimo' | 'ollama' | 'custom';
 
 export interface LLMConfig {
   provider: LLMProvider;
