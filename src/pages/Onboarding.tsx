@@ -233,6 +233,9 @@ export default function OnboardingPage() {
                 />
               </div>
             </div>
+            <p className="text-[11px] text-on-surface-variant/70 -mt-1 leading-relaxed">
+              部分模型的 Coding Plan 与计费版 API 地址不同，请到服务商官网核对后再填。
+            </p>
 
             {/* Test Result */}
             {testResult && (

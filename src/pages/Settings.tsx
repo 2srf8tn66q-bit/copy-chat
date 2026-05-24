@@ -505,6 +505,9 @@ function ConfigForm({
           required
           className="w-full px-4 py-2.5 bg-surface-container-low rounded-lg text-sm text-on-surface placeholder:text-outline outline-none focus:ring-2 focus:ring-primary/30 transition-shadow font-mono"
         />
+        <p className="text-[11px] text-on-surface-variant/70 mt-1.5 leading-relaxed">
+          部分模型的 Coding Plan 与计费版 API 地址不同，请到服务商官网核对后再填。
+        </p>
       </div>
 
       {/* Model */}
