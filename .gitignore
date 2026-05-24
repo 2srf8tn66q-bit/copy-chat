@@ -12,8 +12,7 @@ dist
 dist-ssr
 *.local
 
-# 大视频素材，不入库（部署前需单独上传到 public/）
-public/*.mp4
+# 视频备份文件不入库，但 hero-bg.mp4 / profile-loading.mp4 入库以便 Vercel 部署
 public/*.mp4.bak
 
 # 本地项目 Claude 配置
