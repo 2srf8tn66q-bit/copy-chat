@@ -2,10 +2,11 @@
  * 画像生成服务
  *
  * 接收解析后的 ParseResult，调用 LLM 生成 Character 画像和 TimelineEvent[]。
- * 三步流程：
- *   第一步：生成 Character 画像（identity + persona + voiceFingerprint），不含 memories
- *   第二步：按季度分段提取 memories + IF 线事件（分批并行）
- *   第三步：提取真实对话片段（不需要 LLM）
+ * 流程：
+ *   第零步：本地预处理（精确统计 + 候选语录粗筛 + 对话片段采样）
+ *   第一步：LLM 生成画像（identity + persona + voiceFingerprint），精确值覆盖 LLM 猜测值
+ *   第二步：LLM 按季度分段提取 memories + IF 线事件（分批并行）
+ *   第三步：组装最终结果
  */
 
 import type { Character } from '../types/character';
@@ -24,7 +25,7 @@ export interface GenerationResult {
 
 export type ProgressCallback = (msg: string) => void;
 
-// ─── 工具函数 ────────────────────────────────────────────
+// ─── JSON 工具函数 ──────────────────────────────────────
 
 function extractJSON(text: string): string {
   const jsonBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
@@ -55,12 +56,238 @@ function safeParseJSON<T>(text: string, fallback: T): T {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// 第零步：本地预处理
+// ═══════════════════════════════════════════════════════════
+
+// ─── 精确统计 ────────────────────────────────────────────
+
+interface ComputedStats {
+  avgMessageLength: number;
+  medianMessageLength: number;
+  emojiFrequency: 'none' | 'rare' | 'normal' | 'heavy';
+  punctuationStyle: 'minimal' | 'normal' | 'ellipsis' | 'exclamation';
+  messageStyle: 'single' | 'burst';
+}
+
+function computeStats(messages: Message[]): ComputedStats {
+  const charMsgs = messages.filter(m => m.sender === 'character' && m.type === 'text' && m.content.trim());
+
+  // avgMessageLength & median
+  const lengths = charMsgs.map(m => m.content.trim().length).sort((a, b) => a - b);
+  const avgMessageLength = lengths.length > 0
+    ? Math.round(lengths.reduce((s, l) => s + l, 0) / lengths.length) : 10;
+  const medianMessageLength = lengths.length > 0
+    ? lengths[Math.floor(lengths.length / 2)] : 10;
+
+  // emojiFrequency
+  const emojiPattern = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u;
+  const emojiCount = charMsgs.filter(m => emojiPattern.test(m.content)).length;
+  const emojiRatio = charMsgs.length > 0 ? emojiCount / charMsgs.length : 0;
+  let emojiFrequency: ComputedStats['emojiFrequency'] = 'normal';
+  if (emojiRatio < 0.02) emojiFrequency = 'none';
+  else if (emojiRatio < 0.1) emojiFrequency = 'rare';
+  else if (emojiRatio < 0.4) emojiFrequency = 'normal';
+  else emojiFrequency = 'heavy';
+
+  // punctuationStyle
+  let ellipsisCount = 0, exclamationCount = 0, periodCount = 0;
+  for (const m of charMsgs) {
+    const t = m.content;
+    if (/[…⋯]{1}|\.{3,}|。{2,}/.test(t)) ellipsisCount++;
+    if (/[！!]{1}/.test(t)) exclamationCount++;
+    if (/[。.，,；;]$/.test(t)) periodCount++;
+  }
+  const total = charMsgs.length || 1;
+  let punctuationStyle: ComputedStats['punctuationStyle'] = 'normal';
+  if (ellipsisCount / total > 0.15) punctuationStyle = 'ellipsis';
+  else if (exclamationCount / total > 0.2) punctuationStyle = 'exclamation';
+  else if (periodCount / total < 0.1) punctuationStyle = 'minimal';
+
+  // messageStyle: detect burst patterns
+  let burstCount = 0;
+  let totalTurns = 0;
+  let consecutiveChar = 0;
+  for (const m of messages) {
+    if (m.sender === 'character') {
+      consecutiveChar++;
+    } else {
+      if (consecutiveChar > 0) {
+        totalTurns++;
+        if (consecutiveChar >= 2) burstCount++;
+      }
+      consecutiveChar = 0;
+    }
+  }
+  if (consecutiveChar > 0) {
+    totalTurns++;
+    if (consecutiveChar >= 2) burstCount++;
+  }
+  const messageStyle: ComputedStats['messageStyle'] =
+    totalTurns > 0 && burstCount / totalTurns > 0.3 ? 'burst' : 'single';
+
+  return { avgMessageLength, medianMessageLength, emojiFrequency, punctuationStyle, messageStyle };
+}
+
+// ─── 候选语录粗筛（不分类，只捞候选）─────────────────────
+
+function collectCandidateQuotes(messages: Message[], maxCount: number = 80): string[] {
+  const charMsgs = messages.filter(m => m.sender === 'character' && m.type === 'text');
+  const candidates: { text: string; score: number }[] = [];
+
+  // 合并所有关键词，不区分类别
+  const emotionalKw = [
+    // 生气类
+    '生气', '烦死', '讨厌', '够了', '滚', '别烦', '无语', '气死', '分手', '卧槽',
+    // 甜蜜类（用更长的词避免歧义）
+    '喜欢你', '爱你', '想你', '宝贝', '抱抱', '舍不得', '心疼', '想念', '么么',
+    // 讽刺类（只保留高置信度的）
+    '呵呵', '关我', '恭喜你', '真厉害',
+    // 关心类
+    '别太累', '早点睡', '注意身体', '小心', '担心', '没事吧', '怎么了',
+  ];
+
+  // 否定前缀
+  const negPrefixes = ['不', '没', '别', '没有', '不要', '不会', '不是'];
+
+  for (const msg of charMsgs) {
+    const text = msg.content.trim();
+    if (!text || text.length < 3) continue;
+
+    let score = 0;
+
+    // 关键词命中
+    for (const kw of emotionalKw) {
+      const idx = text.indexOf(kw);
+      if (idx >= 0) {
+        // 否定词检测：关键词前2字是否有否定
+        const prefix = text.substring(Math.max(0, idx - 2), idx);
+        const negated = negPrefixes.some(np => prefix.endsWith(np));
+        if (!negated) score += 2;
+      }
+    }
+
+    // 长度加分（有信息量）
+    if (text.length > 15) score += 1;
+    // 包含问号（有互动）
+    if (/[？?]/.test(text)) score += 1;
+    // 包含感叹号（有情绪）
+    if (/[！!]/.test(text)) score += 1;
+
+    if (score > 0) {
+      candidates.push({ text, score });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+
+  // 去重（相同内容只保留一条）
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const c of candidates) {
+    if (seen.has(c.text)) continue;
+    seen.add(c.text);
+    result.push(c.text);
+    if (result.length >= maxCount) break;
+  }
+  return result;
+}
+
+// ─── 关键词分类（仅兜底用）──────────────────────────────
+
+function categorizeQuotesFallback(messages: Message[]): {
+  angry: string[]; sweet: string[]; sarcastic: string[];
+  daily: string[]; concerned: string[];
+} {
+  const charMsgs = messages.filter(m => m.sender === 'character' && m.type === 'text');
+  const angry: string[] = [], sweet: string[] = [], sarcastic: string[] = [];
+  const daily: string[] = [], concerned: string[] = [];
+
+  for (const msg of charMsgs) {
+    const text = msg.content.trim();
+    if (!text || text.length < 3) continue;
+    let matched = false;
+    if (['生气', '烦死', '讨厌', '够了', '滚', '无语', '气死', '卧槽'].some(kw => text.includes(kw))) {
+      angry.push(text); matched = true;
+    }
+    if (['喜欢你', '爱你', '想你', '宝贝', '抱抱', '舍不得', '想念'].some(kw => text.includes(kw))) {
+      sweet.push(text); matched = true;
+    }
+    if (['呵呵', '关我', '真厉害'].some(kw => text.includes(kw))) {
+      sarcastic.push(text); matched = true;
+    }
+    if (['别太累', '早点睡', '注意身体', '担心', '没事吧', '怎么了'].some(kw => text.includes(kw))) {
+      concerned.push(text); matched = true;
+    }
+    if (!matched && text.length > 5) daily.push(text);
+  }
+
+  return {
+    angry: angry.slice(0, 8), sweet: sweet.slice(0, 8),
+    sarcastic: sarcastic.slice(0, 8), daily: daily.slice(0, 8),
+    concerned: concerned.slice(0, 8),
+  };
+}
+
+// ─── 对话片段采样（按信息量评分）─────────────────────────
+
+function extractSampleConversations(messages: Message[], count: number = 6): string[] {
+  const meaningful = messages.filter(m => m.type === 'text' && m.content.trim().length > 2);
+  if (meaningful.length === 0) return [];
+
+  // 给每条消息算信息量分数
+  const scores: number[] = meaningful.map((m, i) => {
+    let score = 0;
+    if (m.content.length > 15) score += 2;
+    if (/[？?]/.test(m.content)) score += 1;
+    if (/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u.test(m.content)) score += 1;
+    if (m.content.length < 3) score -= 1;
+
+    // 处于连续对话中（前后4条内有不同sender交替）
+    let turns = 0;
+    for (let j = Math.max(0, i - 3); j <= Math.min(meaningful.length - 1, i + 3); j++) {
+      if (j > 0 && meaningful[j].sender !== meaningful[j - 1].sender) turns++;
+    }
+    if (turns >= 3) score += 2;
+    return score;
+  });
+
+  // 找高分消息作为片段中心
+  const indexed = scores.map((s, i) => ({ score: s, idx: i }));
+  indexed.sort((a, b) => b.score - a.score);
+
+  const snippets: string[] = [];
+  const usedRanges = new Set<number>();
+  const snippetLen = 6;
+
+  for (const { idx } of indexed) {
+    if (snippets.length >= count) break;
+    const start = Math.max(0, idx - 2);
+
+    // 跳过已覆盖的范围
+    let overlap = false;
+    for (let k = start; k < start + snippetLen && k < meaningful.length; k++) {
+      if (usedRanges.has(k)) { overlap = true; break; }
+    }
+    if (overlap) continue;
+
+    const slice = meaningful.slice(start, start + snippetLen);
+    if (slice.length < 3) continue;
+
+    // 确保片段包含角色消息
+    if (!slice.some(m => m.sender === 'character')) continue;
+
+    for (let k = start; k < start + snippetLen; k++) usedRanges.add(k);
+
+    snippets.push(slice.map(m =>
+      `${m.sender === 'user' ? '我' : '对方'}：${m.content}`
+    ).join('\n'));
+  }
+  return snippets;
+}
+
 // ─── 时间衰减采样 ────────────────────────────────────────
 
-/**
- * 将消息列表格式化为 LLM 可读的文本
- * 使用时间衰减采样：近期消息采样密度更高
- */
 function formatMessagesForPrompt(messages: Message[], maxChars: number = 15000): string {
   const meaningful = messages.filter(msg => msg.content.length > 5);
   if (meaningful.length === 0) return '';
@@ -100,84 +327,106 @@ function formatMessagesForPrompt(messages: Message[], maxChars: number = 15000):
   return result;
 }
 
-// ─── 语录分类 ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// 第一步：LLM 生成画像
+// ═══════════════════════════════════════════════════════════
 
-function categorizeQuotes(messages: Message[]): {
-  angry: string[]; sweet: string[]; sarcastic: string[];
-  daily: string[]; concerned: string[];
-} {
-  const characterMessages = messages.filter(m => m.sender === 'character' && m.type === 'text');
-  const angry: string[] = [], sweet: string[] = [], sarcastic: string[] = [];
-  const daily: string[] = [], concerned: string[] = [];
+function buildProfilePrompt(
+  parseResult: ParseResult | HTMLParseResult,
+  candidateQuotes: string[],
+): ChatMessage[] {
+  const { messages, participants, startDate, endDate, totalMessages } = parseResult;
+  const messageText = formatMessagesForPrompt(messages);
 
-  const angryKw = ['生气', '烦', '讨厌', '够了', '不想', '滚', '别烦', '随便', '无语', '气死', '恨', '道歉', '分手', '老子', '他妈', '卧槽'];
-  const sweetKw = ['喜欢', '爱', '想你', '宝贝', '亲', '抱抱', '乖', '甜蜜', '在一起', '舍不得', '牵挂', '心疼', '想念', '晚安', '么么'];
-  const sarcasticKw = ['哦', '呵呵', '是吗', '随便你', '你说呢', '行吧', '无所谓', '关我', '恭喜', '厉害', '佩服'];
-  const concernedKw = ['注意', '小心', '照顾', '身体', '别太累', '休息', '吃饭', '安全', '担心', '没事吧', '怎么了', '早点睡'];
+  const systemPrompt = `你是一个专业的对话分析 AI，擅长从聊天记录中深度剖析人物性格。
+你需要根据提供的聊天记录，生成一份详细的人物画像。
 
-  for (const msg of characterMessages) {
-    const text = msg.content.trim();
-    if (!text || text.length < 2) continue;
-    let matched = false;
-    if (angryKw.some(kw => text.includes(kw)))   { angry.push(text); matched = true; }
-    if (sweetKw.some(kw => text.includes(kw)))    { sweet.push(text); matched = true; }
-    if (sarcasticKw.some(kw => text.includes(kw))) { sarcastic.push(text); matched = true; }
-    if (concernedKw.some(kw => text.includes(kw))) { concerned.push(text); matched = true; }
-    if (!matched) daily.push(text);
+重要规则：
+1. 你必须返回合法的 JSON 格式（不要用 markdown 代码块包裹）
+2. voiceFingerprint.quotes 中的语录必须是从原始聊天记录或候选语录中提取的真实语句，绝对不能编造
+3. 所有分析必须基于聊天记录中的实际内容，不要臆测
+4. 如果信息不足以判断某个字段，填写合理的默认值
+5. 不需要生成 memories 部分`;
+
+  const candidateSection = candidateQuotes.length > 0
+    ? `\n以下是对方说过的一些有特点的原话（未分类），请你判断每条的情绪类别，挑选最有代表性的放入对应的 quotes 分类中：\n${candidateQuotes.map(q => `- "${q}"`).join('\n')}\n`
+    : '';
+
+  const userPrompt = `请分析以下聊天记录，生成对方（${participants.other}）的人物画像。
+
+聊天记录概览：
+- 对方名字：${participants.other}
+- 消息条数：${totalMessages}
+- 时间范围：${startDate || '未知'} ~ ${endDate || '未知'}
+
+以下是聊天记录（近期消息采样密度更高）：
+---
+${messageText}
+---
+${candidateSection}
+请返回如下格式的 JSON（不要包含任何其他文字，不要包含 memories 字段）：
+{
+  "gender": "male 或 female 或 unknown（根据说话方式和内容推断）",
+  "relationshipToUser": "你们的关系，如：恋人、好朋友、闺蜜、大学室友、同事、家人等",
+  "identity": {
+    "name": "对方的名字",
+    "avatar": "",
+    "ageEstimate": "推测的年龄段",
+    "occupationHint": "推测的职业方向"
+  },
+  "persona": {
+    "personalityTags": ["3-6个性格标签"],
+    "attachmentStyle": "依恋类型",
+    "speakingStyle": "说话风格描述，50字以内",
+    "emotionalLogic": "情绪逻辑描述",
+    "typicalPhrases": ["3-5个常用口头禅"],
+    "responseLength": "short/medium/long",
+    "neverSay": ["这个人绝对不会使用的3-5种表达方式，比如某些称呼、语气词、说话方式"]
+  },
+  "voiceFingerprint": {
+    "quotes": {
+      "angry": ["生气/不满时的真实语录，2-5条，必须从聊天记录或候选语录中提取"],
+      "sweet": ["甜蜜/亲密时的真实语录，2-5条"],
+      "sarcastic": ["讽刺/敷衍时的真实语录，1-5条"],
+      "daily": ["日常对话中的真实语录，3-5条"],
+      "concerned": ["关心/担忧时的真实语录，2-5条"]
+    },
+    "habits": {
+      "emojiFrequency": "none/rare/normal/heavy",
+      "frequentEmojis": ["常用emoji"],
+      "catchphrases": ["无意识的语言习惯，如句尾带'嘛''呀''啦'，或特定的语气词"],
+      "avgMessageLength": 10,
+      "rhetoricalFreq": "high/medium/low",
+      "punctuationStyle": "minimal/normal/ellipsis/exclamation"
+    },
+    "patterns": {
+      "whenPushed": "被逼问时的反应",
+      "whenAngry": "生气时的反应",
+      "whenSurprised": "惊讶时的反应",
+      "whenMoved": "被感动时的反应"
+    }
   }
+}`;
 
-  return {
-    angry: angry.slice(0, 10), sweet: sweet.slice(0, 10),
-    sarcastic: sarcastic.slice(0, 10), daily: daily.slice(0, 10),
-    concerned: concerned.slice(0, 10),
-  };
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ];
 }
 
-// ─── 提取真实对话片段 ─────────────────────────────────────
-
-function extractSampleConversations(messages: Message[], count: number = 5): string[] {
-  const meaningful = messages.filter(m => m.type === 'text' && m.content.trim().length > 2);
-  if (meaningful.length === 0) return [];
-
-  // 优先取最近的消息
-  const recent = meaningful.slice(-count * 20);
-  const snippets: string[] = [];
-  const usedStarts = new Set<number>();
-  const snippetLen = 6;
-
-  const characterMsgs = recent
-    .map((m, i) => ({ msg: m, idx: i }))
-    .filter(({ msg }) => msg.sender === 'character');
-
-  const attempts = Math.min(count * 3, characterMsgs.length);
-  for (let a = 0; a < attempts && snippets.length < count; a++) {
-    const charIdx = characterMsgs[Math.floor(Math.random() * characterMsgs.length)];
-    const start = Math.max(0, charIdx.idx - 2);
-    if (usedStarts.has(start)) continue;
-    usedStarts.add(start);
-
-    const slice = recent.slice(start, start + snippetLen);
-    if (slice.length < 3) continue;
-
-    snippets.push(slice.map(m =>
-      `${m.sender === 'user' ? '我' : '对方'}：${m.content}`
-    ).join('\n'));
-  }
-  return snippets;
-}
-
-// ─── 按季度切分消息 ──────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// 第二步：分段提取记忆 + IF 线事件
+// ═══════════════════════════════════════════════════════════
 
 interface QuarterSegment {
-  label: string;  // e.g. "2024-Q3"
-  start: string;  // e.g. "2024-07"
-  end: string;    // e.g. "2024-09"
+  label: string;
+  start: string;
+  end: string;
   messages: Message[];
 }
 
 function divideByQuarter(messages: Message[]): QuarterSegment[] {
   const map = new Map<string, Message[]>();
-
   for (const msg of messages) {
     if (!msg.timestamp) continue;
     const d = new Date(msg.timestamp);
@@ -202,96 +451,8 @@ function divideByQuarter(messages: Message[]): QuarterSegment[] {
       messages: msgs,
     });
   }
-
   return segments;
 }
-
-// ─── 第一轮：生成画像（不含 memories）──────────────────────
-
-function buildProfilePrompt(
-  parseResult: ParseResult | HTMLParseResult,
-  preCategorizedQuotes: ReturnType<typeof categorizeQuotes>,
-): ChatMessage[] {
-  const { messages, participants, startDate, endDate, totalMessages } = parseResult;
-  const messageText = formatMessagesForPrompt(messages);
-
-  const systemPrompt = `你是一个专业的对话分析 AI，擅长从聊天记录中深度剖析人物性格。
-你需要根据提供的聊天记录，生成一份详细的人物画像。
-
-重要规则：
-1. 你必须返回合法的 JSON 格式（不要用 markdown 代码块包裹）
-2. voiceFingerprint.quotes 中的语录必须是从原始聊天记录中提取的真实语句，绝对不能编造
-3. 所有分析必须基于聊天记录中的实际内容，不要臆测
-4. 如果信息不足以判断某个字段，填写合理的默认值
-5. 不需要生成 memories 部分，只需要 identity、persona、voiceFingerprint`;
-
-  const userPrompt = `请分析以下聊天记录，生成对方（${participants.other}）的人物画像。
-
-聊天记录概览：
-- 对方名字：${participants.other}
-- 消息条数：${totalMessages}
-- 时间范围：${startDate || '未知'} ~ ${endDate || '未知'}
-
-以下是聊天记录（近期消息采样密度更高）：
----
-${messageText}
----
-
-预先提取的语录参考：
-- 生气/不满类：${JSON.stringify(preCategorizedQuotes.angry.slice(0, 5))}
-- 甜蜜/亲密类：${JSON.stringify(preCategorizedQuotes.sweet.slice(0, 5))}
-- 讽刺/冷漠类：${JSON.stringify(preCategorizedQuotes.sarcastic.slice(0, 5))}
-- 日常类：${JSON.stringify(preCategorizedQuotes.daily.slice(0, 5))}
-- 关心/担忧类：${JSON.stringify(preCategorizedQuotes.concerned.slice(0, 5))}
-
-请返回如下格式的 JSON（不要包含任何其他文字，不要包含 memories 字段）：
-{
-  "identity": {
-    "name": "对方的名字",
-    "avatar": "",
-    "ageEstimate": "推测的年龄段",
-    "occupationHint": "推测的职业方向"
-  },
-  "persona": {
-    "personalityTags": ["3-6个性格标签"],
-    "attachmentStyle": "依恋类型",
-    "speakingStyle": "说话风格描述，50字以内",
-    "emotionalLogic": "情绪逻辑描述",
-    "typicalPhrases": ["3-5个常用口头禅"],
-    "responseLength": "short/medium/long"
-  },
-  "voiceFingerprint": {
-    "quotes": {
-      "angry": ["生气时的真实语录，2-5条"],
-      "sweet": ["甜蜜时的真实语录，2-5条"],
-      "sarcastic": ["讽刺时的真实语录，1-5条"],
-      "daily": ["日常对话中的真实语录，3-5条"],
-      "concerned": ["关心时的真实语录，2-5条"]
-    },
-    "habits": {
-      "emojiFrequency": "none/rare/normal/heavy",
-      "frequentEmojis": ["常用emoji"],
-      "catchphrases": ["口癖"],
-      "avgMessageLength": 10,
-      "rhetoricalFreq": "high/medium/low",
-      "punctuationStyle": "minimal/normal/ellipsis/exclamation"
-    },
-    "patterns": {
-      "whenPushed": "被逼问时的反应",
-      "whenAngry": "生气时的反应",
-      "whenSurprised": "惊讶时的反应",
-      "whenMoved": "被感动时的反应"
-    }
-  }
-}`;
-
-  return [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt },
-  ];
-}
-
-// ─── 第二轮：分段提取记忆 + IF 线事件 ──────────────────────
 
 interface SegmentResult {
   places: string[];
@@ -312,7 +473,6 @@ function buildSegmentPrompt(
   segment: QuarterSegment,
   participants: { self: string; other: string },
 ): ChatMessage[] {
-  // 每段采样，保留足够消息
   const msgs = segment.messages;
   const meaningful = msgs.filter(m => m.content.trim().length > 2);
   const step = Math.max(1, Math.floor(meaningful.length / 200));
@@ -377,7 +537,6 @@ async function extractSegment(
     places: [], jokes: [], conflicts: [],
     relationshipMilestones: [], events: [],
   };
-
   try {
     const prompt = buildSegmentPrompt(segment, participants);
     const response = await sendChatMessage(llmConfig, prompt);
@@ -399,23 +558,27 @@ async function runInBatches<T>(
   return results;
 }
 
-// ─── 默认值 ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// 默认值
+// ═══════════════════════════════════════════════════════════
 
 function defaultCharacter(): Omit<Character, 'id' | 'createdAt' | 'sourceType'> {
   return {
+    gender: 'unknown',
+    relationshipToUser: '',
+    messageStyle: 'single',
     identity: { name: '未知', avatar: '', ageEstimate: '', occupationHint: '' },
     persona: {
       personalityTags: [], attachmentStyle: '', speakingStyle: '',
       emotionalLogic: '', typicalPhrases: [], responseLength: 'medium',
+      neverSay: [],
     },
     memories: {
       relationshipTimeline: [], sharedPlaces: [],
       insideJokes: [], conflictPatterns: [],
     },
     voiceFingerprint: {
-      quotes: {
-        angry: [], sweet: [], sarcastic: [], daily: [], concerned: [],
-      },
+      quotes: { angry: [], sweet: [], sarcastic: [], daily: [], concerned: [] },
       habits: {
         emojiFrequency: 'normal', frequentEmojis: [], catchphrases: [],
         avgMessageLength: 10, rhetoricalFreq: 'medium', punctuationStyle: 'normal',
@@ -425,89 +588,115 @@ function defaultCharacter(): Omit<Character, 'id' | 'createdAt' | 'sourceType'> 
   };
 }
 
-// ─── 主函数 ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// 主函数
+// ═══════════════════════════════════════════════════════════
 
 export async function generateFromParsedData(
   parseResult: ParseResult | HTMLParseResult,
   llmConfig: LLMConfig,
   onProgress?: ProgressCallback,
 ): Promise<GenerationResult> {
-  const defaultResult: GenerationResult = {
-    character: defaultCharacter(),
-    events: [],
-  };
-
+  const defaultResult: GenerationResult = { character: defaultCharacter(), events: [] };
   defaultResult.character.identity.name = parseResult.participants.other;
 
   if (parseResult.messages.length === 0) return defaultResult;
 
-  const preCategorizedQuotes = categorizeQuotes(parseResult.messages);
+  // ─── 第零步：本地预处理 ────
+  onProgress?.('正在分析聊天数据...');
+
+  const stats = computeStats(parseResult.messages);
+  const candidateQuotes = collectCandidateQuotes(parseResult.messages);
+  const fallbackQuotes = categorizeQuotesFallback(parseResult.messages);
+
   let character = defaultResult.character;
 
-  // ─── 第一步：生成画像（identity + persona + voiceFingerprint）────
+  // ─── 第一步：LLM 生成画像 ────
   onProgress?.('正在生成性格画像...');
 
   try {
-    const profileMessages = buildProfilePrompt(parseResult, preCategorizedQuotes);
+    const profileMessages = buildProfilePrompt(parseResult, candidateQuotes);
     const profileResponse = await sendChatMessage(llmConfig, profileMessages);
-    const parsed = safeParseJSON<Partial<Character> | null>(profileResponse, null);
+    const parsed = safeParseJSON<Record<string, unknown> | null>(profileResponse, null);
 
     if (parsed) {
-      if (parsed.identity) {
+      // gender / relationshipToUser
+      if (typeof parsed.gender === 'string' && ['male', 'female', 'unknown'].includes(parsed.gender)) {
+        character.gender = parsed.gender as Character['gender'];
+      }
+      if (typeof parsed.relationshipToUser === 'string') {
+        character.relationshipToUser = parsed.relationshipToUser;
+      }
+
+      // identity
+      const pid = parsed.identity as Record<string, string> | undefined;
+      if (pid) {
         character.identity = {
-          name: parsed.identity.name || parseResult.participants.other,
-          avatar: parsed.identity.avatar || '',
-          ageEstimate: parsed.identity.ageEstimate || '',
-          occupationHint: parsed.identity.occupationHint || '',
+          name: pid.name || parseResult.participants.other,
+          avatar: pid.avatar || '',
+          ageEstimate: pid.ageEstimate || '',
+          occupationHint: pid.occupationHint || '',
         };
       }
-      if (parsed.persona) {
+
+      // persona
+      const pp = parsed.persona as Record<string, unknown> | undefined;
+      if (pp) {
         character.persona = {
-          personalityTags: Array.isArray(parsed.persona.personalityTags) ? parsed.persona.personalityTags : [],
-          attachmentStyle: parsed.persona.attachmentStyle || '',
-          speakingStyle: parsed.persona.speakingStyle || '',
-          emotionalLogic: parsed.persona.emotionalLogic || '',
-          typicalPhrases: Array.isArray(parsed.persona.typicalPhrases) ? parsed.persona.typicalPhrases : [],
-          responseLength: ['short', 'medium', 'long'].includes(parsed.persona.responseLength || '')
-            ? parsed.persona.responseLength as 'short' | 'medium' | 'long' : 'medium',
+          personalityTags: Array.isArray(pp.personalityTags) ? pp.personalityTags as string[] : [],
+          attachmentStyle: (pp.attachmentStyle as string) || '',
+          speakingStyle: (pp.speakingStyle as string) || '',
+          emotionalLogic: (pp.emotionalLogic as string) || '',
+          typicalPhrases: Array.isArray(pp.typicalPhrases) ? pp.typicalPhrases as string[] : [],
+          responseLength: ['short', 'medium', 'long'].includes(pp.responseLength as string)
+            ? pp.responseLength as 'short' | 'medium' | 'long' : 'medium',
+          neverSay: Array.isArray(pp.neverSay) ? pp.neverSay as string[] : [],
         };
       }
-      if (parsed.voiceFingerprint) {
-        const vf = parsed.voiceFingerprint;
+
+      // voiceFingerprint
+      const vf = parsed.voiceFingerprint as Record<string, unknown> | undefined;
+      if (vf) {
+        const quotes = vf.quotes as Record<string, string[]> | undefined;
+        const habits = vf.habits as Record<string, unknown> | undefined;
+        const patterns = vf.patterns as Record<string, string> | undefined;
+
         character.voiceFingerprint = {
           quotes: {
-            angry: Array.isArray(vf.quotes?.angry) ? vf.quotes.angry : preCategorizedQuotes.angry.slice(0, 5),
-            sweet: Array.isArray(vf.quotes?.sweet) ? vf.quotes.sweet : preCategorizedQuotes.sweet.slice(0, 5),
-            sarcastic: Array.isArray(vf.quotes?.sarcastic) ? vf.quotes.sarcastic : preCategorizedQuotes.sarcastic.slice(0, 5),
-            daily: Array.isArray(vf.quotes?.daily) ? vf.quotes.daily : preCategorizedQuotes.daily.slice(0, 5),
-            concerned: Array.isArray(vf.quotes?.concerned) ? vf.quotes.concerned : preCategorizedQuotes.concerned.slice(0, 5),
+            angry: Array.isArray(quotes?.angry) ? quotes!.angry : fallbackQuotes.angry,
+            sweet: Array.isArray(quotes?.sweet) ? quotes!.sweet : fallbackQuotes.sweet,
+            sarcastic: Array.isArray(quotes?.sarcastic) ? quotes!.sarcastic : fallbackQuotes.sarcastic,
+            daily: Array.isArray(quotes?.daily) ? quotes!.daily : fallbackQuotes.daily,
+            concerned: Array.isArray(quotes?.concerned) ? quotes!.concerned : fallbackQuotes.concerned,
           },
           habits: {
-            emojiFrequency: ['none', 'rare', 'normal', 'heavy'].includes(vf.habits?.emojiFrequency || '')
-              ? vf.habits!.emojiFrequency as 'none' | 'rare' | 'normal' | 'heavy' : 'normal',
-            frequentEmojis: Array.isArray(vf.habits?.frequentEmojis) ? vf.habits.frequentEmojis : [],
-            catchphrases: Array.isArray(vf.habits?.catchphrases) ? vf.habits.catchphrases : [],
-            avgMessageLength: typeof vf.habits?.avgMessageLength === 'number' ? vf.habits.avgMessageLength : 10,
-            rhetoricalFreq: ['high', 'medium', 'low'].includes(vf.habits?.rhetoricalFreq || '')
-              ? vf.habits!.rhetoricalFreq as 'high' | 'medium' | 'low' : 'medium',
-            punctuationStyle: ['minimal', 'normal', 'ellipsis', 'exclamation'].includes(vf.habits?.punctuationStyle || '')
-              ? vf.habits!.punctuationStyle as 'minimal' | 'normal' | 'ellipsis' | 'exclamation' : 'normal',
+            // 精确值覆盖 LLM 猜测值
+            emojiFrequency: stats.emojiFrequency,
+            frequentEmojis: Array.isArray(habits?.frequentEmojis) ? habits!.frequentEmojis as string[] : [],
+            catchphrases: Array.isArray(habits?.catchphrases) ? habits!.catchphrases as string[] : [],
+            avgMessageLength: stats.avgMessageLength,
+            rhetoricalFreq: ['high', 'medium', 'low'].includes(habits?.rhetoricalFreq as string)
+              ? habits!.rhetoricalFreq as 'high' | 'medium' | 'low' : 'medium',
+            punctuationStyle: stats.punctuationStyle,
           },
           patterns: {
-            whenPushed: vf.patterns?.whenPushed || '',
-            whenAngry: vf.patterns?.whenAngry || '',
-            whenSurprised: vf.patterns?.whenSurprised || '',
-            whenMoved: vf.patterns?.whenMoved || '',
+            whenPushed: patterns?.whenPushed || '',
+            whenAngry: patterns?.whenAngry || '',
+            whenSurprised: patterns?.whenSurprised || '',
+            whenMoved: patterns?.whenMoved || '',
           },
         };
       } else {
-        character.voiceFingerprint.quotes = preCategorizedQuotes;
+        character.voiceFingerprint.quotes = fallbackQuotes;
       }
     }
   } catch (error) {
-    console.error('画像生成失败，使用预分类数据:', error);
-    character.voiceFingerprint.quotes = preCategorizedQuotes;
+    console.error('画像生成失败，使用兜底数据:', error);
+    character.voiceFingerprint.quotes = fallbackQuotes;
   }
+
+  // 覆盖 messageStyle
+  character.messageStyle = stats.messageStyle;
 
   // ─── 第二步：分段提取 memories + IF 线事件 ────
   const segments = divideByQuarter(parseResult.messages);
@@ -561,7 +750,6 @@ export async function generateFromParsedData(
     }
   }
 
-  // 去重并合并到 character.memories
   character.memories = {
     relationshipTimeline: [...new Set(allMilestones)],
     sharedPlaces: [...new Set(allPlaces)],
@@ -569,7 +757,6 @@ export async function generateFromParsedData(
     conflictPatterns: [...new Set(allConflicts)],
   };
 
-  // 按日期排序事件
   allEvents.sort((a, b) => a.date.localeCompare(b.date));
 
   // ─── 第三步：提取对话片段 ────

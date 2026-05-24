@@ -10,7 +10,14 @@ interface Particle {
   targetOpacity: number;
 }
 
-export default function ParticleCanvas() {
+interface ParticleCanvasProps {
+  /** 0–1 multiplier on particle count (default 1) */
+  density?: number;
+  /** 0–1 base opacity multiplier (default 1) */
+  intensity?: number;
+}
+
+export default function ParticleCanvas({ density = 1, intensity = 1 }: ParticleCanvasProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouseRef = useRef({ x: 0, y: 0 });
   const particlesRef = useRef<Particle[]>([]);
@@ -29,15 +36,15 @@ export default function ParticleCanvas() {
     resize();
     window.addEventListener('resize', resize);
 
-    const particleCount = 60;
+    const particleCount = Math.max(8, Math.round(60 * density));
     particlesRef.current = Array.from({ length: particleCount }, () => ({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
       vx: (Math.random() - 0.5) * 0.15,
       vy: (Math.random() - 0.5) * 0.15 - 0.05,
       size: Math.random() * 1.5 + 0.5,
-      opacity: Math.random() * 0.4 + 0.1,
-      targetOpacity: Math.random() * 0.5 + 0.2,
+      opacity: (Math.random() * 0.4 + 0.1) * intensity,
+      targetOpacity: (Math.random() * 0.5 + 0.2) * intensity,
     }));
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -65,7 +72,7 @@ export default function ParticleCanvas() {
         if (p.y > canvas.height) p.y = 0;
 
         if (Math.abs(p.opacity - p.targetOpacity) < 0.01) {
-          p.targetOpacity = Math.random() * 0.5 + 0.1;
+          p.targetOpacity = (Math.random() * 0.5 + 0.1) * intensity;
         }
         p.opacity += (p.targetOpacity - p.opacity) * 0.02;
 
@@ -85,7 +92,7 @@ export default function ParticleCanvas() {
       window.removeEventListener('mousemove', handleMouseMove);
       cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [density, intensity]);
 
   return (
     <canvas

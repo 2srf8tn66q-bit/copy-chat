@@ -1,14 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Sun, Moon } from 'lucide-react';
+import { AnimatePresence } from 'motion/react';
 import { useCharacterStore } from '../stores/characterStore';
 import { useLLMStore } from '../stores/llmStore';
+import { useChatThemeStore } from '../stores/chatThemeStore';
+import { useUserProfileStore } from '../stores/userProfileStore';
+import { useChatColors } from '../components/chat/chatTheme';
 import { buildMessages } from '../services/chatPromptBuilder';
 import { sendChatMessage } from '../services/llmService';
-import { getCharacter as getCharacterFromDB, getRawMessages } from '../services/storage';
+import {
+  getCharacter as getCharacterFromDB,
+  getRawMessages,
+  getIFChatSession,
+  saveIFChatSession,
+  deleteIFChatSession,
+} from '../services/storage';
+import type { IFChatSession } from '../services/storage';
 import ChatBubble from '../components/chat/ChatBubble';
 import ChatInput from '../components/chat/ChatInput';
 import TypingIndicator from '../components/chat/TypingIndicator';
+import LoadingState from '../components/LoadingState';
 import type { Character } from '../types/character';
 import type { Message } from '../types/timeline';
 import type { ChatMessage } from '../types/llm';
@@ -60,14 +72,19 @@ function shouldShowTimestamp(msgs: Message[], i: number): boolean {
 
 export default function WhatIfPage() {
   const { id: characterId } = useParams<{ id: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
   const getCharacter = useCharacterStore((s) => s.getCharacter);
   const addCharacter = useCharacterStore((s) => s.addCharacter);
   const getActiveConfig = useLLMStore((s) => s.getActiveConfig);
+  const c = useChatColors();
+  const theme = useChatThemeStore((s) => s.theme);
+  const toggleTheme = useChatThemeStore((s) => s.toggle);
+  const userAvatar = useUserProfileStore((s) => s.avatar);
 
   const startDate = searchParams.get('startDate') ?? '';
+  const sessionId = searchParams.get('sessionId') ?? '';
 
   // State
   const [mode, setMode] = useState<'loading' | 'browse' | 'chat'>('loading');
@@ -79,14 +96,23 @@ export default function WhatIfPage() {
   const [ifMessages, setIfMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const ifMessagesRef = useRef(ifMessages);
   ifMessagesRef.current = ifMessages;
+  const justCreatedRef = useRef(false);
 
   // ── Initialize ──
   useEffect(() => {
-    if (!characterId || !startDate) return;
+    if (!characterId) return;
+    if (!startDate && !sessionId) return;
+
+    // Skip re-init if we just created a session via handleIntervene
+    if (justCreatedRef.current) {
+      justCreatedRef.current = false;
+      return;
+    }
 
     const init = async () => {
       let char = getCharacter(characterId);
@@ -101,7 +127,25 @@ export default function WhatIfPage() {
       if (raw.length === 0) { setMode('browse'); return; }
       setAllRaw(raw);
 
-      // Find index closest to startDate
+      // Resuming an existing session?
+      if (sessionId) {
+        const saved = await getIFChatSession(characterId, sessionId);
+        if (saved && saved.messages.length > 0) {
+          setCurrentSessionId(saved.id);
+          setInterventionIdx(saved.interventionIdx);
+          setIfMessages(saved.messages);
+
+          // Calculate visible range around intervention point
+          const s = Math.max(0, saved.interventionIdx - Math.floor(PAGE_SIZE / 2));
+          const e = Math.min(raw.length, s + PAGE_SIZE);
+          setVisibleStart(s);
+          setVisibleEnd(e);
+          setMode('chat');
+          return;
+        }
+      }
+
+      // Fresh browse: find index closest to startDate
       const target = new Date(startDate).getTime();
       let closest = 0;
       let minDist = Infinity;
@@ -121,9 +165,9 @@ export default function WhatIfPage() {
     };
 
     init();
-  }, [characterId, startDate, getCharacter, addCharacter]);
+  }, [characterId, startDate, sessionId, getCharacter, addCharacter]);
 
-  // ── Initial scroll to center ──
+  // ── Initial scroll to center (browse mode) ──
   const didInitialScroll = useRef(false);
 
   useEffect(() => {
@@ -138,6 +182,43 @@ export default function WhatIfPage() {
     }
   }, [mode, allRaw.length]);
 
+  // ── Persist IF session (debounced) ──
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!characterId || interventionIdx === null || ifMessages.length === 0 || !currentSessionId) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const session: IFChatSession = {
+        id: currentSessionId,
+        characterId,
+        interventionIdx,
+        messages: ifMessages,
+        startDate: startDate || allRaw[interventionIdx]?.timestamp?.slice(0, 10) || '',
+        createdAt: '', // will be filled if new
+        updatedAt: new Date().toISOString(),
+        contextPreview: allRaw[interventionIdx]?.content?.slice(0, 60) || '',
+      };
+      // Preserve original createdAt
+      getIFChatSession(characterId, currentSessionId).then(existing => {
+        session.createdAt = existing?.createdAt || session.updatedAt;
+        saveIFChatSession(session).catch(console.error);
+      });
+    }, 500);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [ifMessages, characterId, startDate, interventionIdx, currentSessionId, allRaw]);
+
+  // ── Auto-scroll to bottom when entering chat mode or new messages ──
+  useEffect(() => {
+    if (mode === 'chat' && scrollRef.current) {
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      });
+    }
+  }, [mode, ifMessages.length]);
+
   // ── Infinite scroll ──
   const isLoadingMore = useRef(false);
 
@@ -145,14 +226,12 @@ export default function WhatIfPage() {
     const el = scrollRef.current;
     if (!el || mode !== 'browse' || isLoadingMore.current) return;
 
-    // Near bottom → load more below
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 100 && visibleEnd < allRaw.length) {
       isLoadingMore.current = true;
       setVisibleEnd(Math.min(allRaw.length, visibleEnd + PAGE_SIZE));
       requestAnimationFrame(() => { isLoadingMore.current = false; });
     }
 
-    // Near top → load more above
     if (el.scrollTop < 100 && visibleStart > 0) {
       isLoadingMore.current = true;
       const oldHeight = el.scrollHeight;
@@ -166,18 +245,35 @@ export default function WhatIfPage() {
     }
   }, [mode, visibleStart, visibleEnd, allRaw.length]);
 
-  // ── Intervention ──
+  // ── Intervention: create a new session ──
   const handleIntervene = useCallback((idx: number) => {
+    const newId = `ifs_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    justCreatedRef.current = true;
+    setCurrentSessionId(newId);
     setInterventionIdx(idx);
     setIfMessages([]);
     setMode('chat');
-  }, []);
+    // Update URL to include sessionId so refresh works
+    setSearchParams(prev => {
+      prev.set('sessionId', newId);
+      return prev;
+    });
+  }, [setSearchParams]);
 
   const handleReset = useCallback(() => {
+    // Delete the current session if it has no messages
+    if (characterId && currentSessionId) {
+      deleteIFChatSession(characterId, currentSessionId).catch(console.error);
+    }
+    setCurrentSessionId(null);
     setInterventionIdx(null);
     setIfMessages([]);
     setMode('browse');
-  }, []);
+    setSearchParams(prev => {
+      prev.delete('sessionId');
+      return prev;
+    });
+  }, [characterId, currentSessionId, setSearchParams]);
 
   // ── Send message ──
   const handleSend = useCallback(async (text: string) => {
@@ -191,8 +287,7 @@ export default function WhatIfPage() {
     setIsTyping(true);
 
     try {
-      // Context: raw messages up to intervention point + previous IF messages
-      const contextRaw = allRaw.slice(visibleStart, interventionIdx + 1);
+      const contextRaw = allRaw.slice(Math.max(0, interventionIdx - 20), interventionIdx + 1);
       const chatHistory: ChatMessage[] = [
         ...contextRaw.map(messageToChatMessage),
         ...ifMessagesRef.current.map(messageToChatMessage),
@@ -209,28 +304,36 @@ export default function WhatIfPage() {
       );
 
       const reply = await sendChatMessage(config, llmMessages);
-      setIfMessages(prev => [...prev, createMessage('character', reply)]);
+      // Burst mode: split on |||
+      if (character.messageStyle === 'burst' && reply.includes('|||')) {
+        const parts = reply.split('|||').map(s => s.trim()).filter(Boolean);
+        for (let i = 0; i < parts.length; i++) {
+          if (i > 0) await new Promise(r => setTimeout(r, 300 + Math.random() * 500));
+          setIfMessages(prev => [...prev, createMessage('character', parts[i])]);
+        }
+      } else {
+        setIfMessages(prev => [...prev, createMessage('character', reply)]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '发送失败');
     } finally {
       setIsTyping(false);
     }
-  }, [character, interventionIdx, visibleStart, allRaw, startDate, getActiveConfig]);
+  }, [character, interventionIdx, allRaw, startDate, getActiveConfig]);
+
+  const accent = c.inputIconActive;  // 强调色：浅色用 WeChat 绿，深色用品牌主绿
+  const accentMuted = `${accent}40`; // 25% opacity 描边版
 
   // ── Loading ──
   if (mode === 'loading') {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center" style={{ backgroundColor: '#EDEDED' }}>
-        <p style={{ color: '#999' }}>加载中...</p>
-      </div>
-    );
+    return <LoadingState bg={c.bg} textColor={c.timestamp} />;
   }
 
   if (!character) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: '#EDEDED' }}>
-        <p style={{ color: '#666' }}>角色不存在</p>
-        <button onClick={() => navigate('/characters')} className="px-4 py-2 rounded-lg text-sm" style={{ backgroundColor: '#07c160', color: '#fff' }}>
+      <div className="h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: c.bg }}>
+        <p style={{ color: c.timestamp }}>角色不存在</p>
+        <button onClick={() => navigate('/characters')} className="px-4 py-2 rounded-lg text-sm" style={{ backgroundColor: accent, color: '#fff' }}>
           返回角色列表
         </button>
       </div>
@@ -241,29 +344,56 @@ export default function WhatIfPage() {
 
   // ── Render ──
   return (
-    <div className="h-screen flex flex-col" style={{ backgroundColor: '#EDEDED' }}>
+    <div className="h-screen flex flex-col" style={{ backgroundColor: c.bg, transition: 'background-color 240ms ease' }}>
       {/* Header */}
-      <div className="flex items-center shrink-0" style={{ height: '48px', backgroundColor: '#EDEDED', borderBottom: '1px solid #d9d9d9' }}>
+      <div
+        className="flex items-center shrink-0"
+        style={{
+          height: '48px',
+          backgroundColor: c.header,
+          borderBottom: `1px solid ${c.headerBorder}`,
+          transition: 'background-color 240ms ease, border-color 240ms ease',
+        }}
+      >
         <button
           onClick={() => navigate(`/characters/${characterId}/timeline`)}
           className="flex items-center justify-center shrink-0"
           style={{ width: '40px', height: '100%', border: 'none', background: 'transparent', cursor: 'pointer' }}
         >
-          <ChevronLeft size={24} color="#000" />
+          <ChevronLeft size={24} color={c.headerText} />
         </button>
-        <div className="flex-1 text-center" style={{ fontSize: '17px', fontWeight: 500, color: '#000', lineHeight: '48px' }}>
+        <div className="flex-1 text-center" style={{ fontSize: '17px', fontWeight: 500, color: c.headerText, lineHeight: '48px' }}>
           {mode === 'browse' ? 'IF 线 · 回顾' : `IF 线 · ${character.identity.name}`}
         </div>
-        <div className="shrink-0 flex items-center" style={{ width: '50px', height: '100%', justifyContent: 'flex-end', paddingRight: '8px' }}>
+        <div className="shrink-0 flex items-center gap-1 pr-2" style={{ height: '100%' }}>
           {mode === 'chat' && (
             <button
               onClick={handleReset}
-              className="text-xs"
-              style={{ color: '#07c160', border: 'none', background: 'none', cursor: 'pointer' }}
+              className="text-xs px-2"
+              style={{ color: accent, border: 'none', background: 'none', cursor: 'pointer' }}
             >
               重新选择
             </button>
           )}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex items-center justify-center"
+            style={{
+              width: '36px',
+              height: '36px',
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              borderRadius: '8px',
+            }}
+            title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+          >
+            {theme === 'dark'
+              ? <Sun size={18} color={c.toggleIcon} />
+              : <Moon size={18} color={c.toggleIcon} />
+            }
+          </button>
         </div>
       </div>
 
@@ -279,48 +409,50 @@ export default function WhatIfPage() {
         <div className="py-3">
           {mode === 'browse' ? (
             <>
-              {/* Empty state */}
               {allRaw.length === 0 ? (
                 <div className="text-center py-16">
-                  <p className="text-sm" style={{ color: '#999' }}>没有原始聊天记录</p>
-                  <p className="text-xs mt-1" style={{ color: '#bbb' }}>请重新导入聊天记录以使用 IF 线功能</p>
+                  <p className="text-sm" style={{ color: c.timestamp }}>没有原始聊天记录</p>
+                  <p className="text-xs mt-1" style={{ color: c.timestamp, opacity: 0.7 }}>请重新导入聊天记录以使用 IF 线功能</p>
                 </div>
               ) : (
                 <>
                   {visibleStart > 0 && (
                     <div className="text-center py-3">
-                      <span className="text-xs" style={{ color: '#999' }}>↑ 上滑加载更早的消息</span>
+                      <span className="text-xs" style={{ color: c.timestamp }}>↑ 上滑加载更早的消息</span>
                     </div>
                   )}
 
-                  {visibleRaw.map((msg, i) => {
-                    const globalIdx = visibleStart + i;
-                    return (
-                      <div key={msg.id || `raw-${globalIdx}`}>
-                        <ChatBubble
-                          message={msg}
-                          showAvatar={shouldShowAvatar(visibleRaw, i)}
-                          characterAvatar={character.identity.avatar}
-                          showTimestamp={shouldShowTimestamp(visibleRaw, i)}
-                        />
-                        {msg.type !== 'system' && (
-                          <div className="flex justify-center py-0.5">
-                            <button
-                              onClick={() => handleIntervene(globalIdx)}
-                              className="text-xs px-3 py-1 rounded-full"
-                              style={{ color: '#07c160', backgroundColor: 'transparent', border: '1px solid rgba(7,193,96,0.25)', cursor: 'pointer' }}
-                            >
-                              从这里开始改变
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  <AnimatePresence initial={false}>
+                    {visibleRaw.map((msg, i) => {
+                      const globalIdx = visibleStart + i;
+                      return (
+                        <div key={msg.id || `raw-${globalIdx}`}>
+                          <ChatBubble
+                            message={msg}
+                            showAvatar={shouldShowAvatar(visibleRaw, i)}
+                            characterAvatar={character.identity.avatar}
+                            userAvatar={userAvatar}
+                            showTimestamp={shouldShowTimestamp(visibleRaw, i)}
+                          />
+                          {msg.type !== 'system' && (
+                            <div className="flex justify-center py-0.5">
+                              <button
+                                onClick={() => handleIntervene(globalIdx)}
+                                className="text-xs px-3 py-1 rounded-full"
+                                style={{ color: accent, backgroundColor: 'transparent', border: `1px solid ${accentMuted}`, cursor: 'pointer' }}
+                              >
+                                从这里开始改变
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </AnimatePresence>
 
                   {visibleEnd < allRaw.length && (
                     <div className="text-center py-3">
-                      <span className="text-xs" style={{ color: '#999' }}>↓ 下滑加载更多消息</span>
+                      <span className="text-xs" style={{ color: c.timestamp }}>↓ 下滑加载更多消息</span>
                     </div>
                   )}
                 </>
@@ -329,36 +461,42 @@ export default function WhatIfPage() {
           ) : (
             <>
               {/* Chat mode: raw context + divider + IF messages */}
-              {(() => {
-                const contextRaw = allRaw.slice(visibleStart, interventionIdx! + 1);
-                return contextRaw.map((msg, i) => (
-                  <ChatBubble
-                    key={msg.id || `ctx-${i}`}
-                    message={msg}
-                    showAvatar={shouldShowAvatar(contextRaw, i)}
-                    characterAvatar={character.identity.avatar}
-                    showTimestamp={shouldShowTimestamp(contextRaw, i)}
-                  />
-                ));
-              })()}
+              <AnimatePresence initial={false}>
+                {(() => {
+                  const contextRaw = allRaw.slice(Math.max(0, (interventionIdx ?? 0) - 10), (interventionIdx ?? 0) + 1);
+                  return contextRaw.map((msg, i) => (
+                    <ChatBubble
+                      key={msg.id || `ctx-${i}`}
+                      message={msg}
+                      showAvatar={shouldShowAvatar(contextRaw, i)}
+                      characterAvatar={character.identity.avatar}
+                      userAvatar={userAvatar}
+                      showTimestamp={shouldShowTimestamp(contextRaw, i)}
+                    />
+                  ));
+                })()}
+              </AnimatePresence>
 
               {/* Divider */}
               <div className="flex items-center gap-3 px-6 py-3">
-                <div className="flex-1 h-px" style={{ backgroundColor: '#07c160' }} />
-                <span className="text-xs font-medium" style={{ color: '#07c160' }}>从这里开始改变</span>
-                <div className="flex-1 h-px" style={{ backgroundColor: '#07c160' }} />
+                <div className="flex-1 h-px" style={{ backgroundColor: accent, opacity: 0.6 }} />
+                <span className="text-xs font-medium" style={{ color: accent }}>从这里开始改变</span>
+                <div className="flex-1 h-px" style={{ backgroundColor: accent, opacity: 0.6 }} />
               </div>
 
               {/* IF messages */}
-              {ifMessages.map((msg, i) => (
-                <ChatBubble
-                  key={msg.id}
-                  message={msg}
-                  showAvatar={shouldShowAvatar(ifMessages, i)}
-                  characterAvatar={character.identity.avatar}
-                  showTimestamp={shouldShowTimestamp(ifMessages, i)}
-                />
-              ))}
+              <AnimatePresence initial={false}>
+                {ifMessages.map((msg, i) => (
+                  <ChatBubble
+                    key={msg.id}
+                    message={msg}
+                    showAvatar={shouldShowAvatar(ifMessages, i)}
+                    characterAvatar={character.identity.avatar}
+                    userAvatar={userAvatar}
+                    showTimestamp={shouldShowTimestamp(ifMessages, i)}
+                  />
+                ))}
+              </AnimatePresence>
               <TypingIndicator visible={isTyping} />
             </>
           )}

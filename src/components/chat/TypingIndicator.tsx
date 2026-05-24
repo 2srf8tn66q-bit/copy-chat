@@ -1,8 +1,11 @@
+import { useChatColors } from './chatTheme';
+
 interface TypingIndicatorProps {
   visible: boolean;
 }
 
 export default function TypingIndicator({ visible }: TypingIndicatorProps) {
+  const c = useChatColors();
   if (!visible) return null;
 
   return (
@@ -14,7 +17,7 @@ export default function TypingIndicator({ visible }: TypingIndicatorProps) {
           width: '40px',
           height: '40px',
           borderRadius: '4px',
-          backgroundColor: '#d9d9d9',
+          backgroundColor: c.avatarBg,
         }}
       />
 
@@ -22,8 +25,10 @@ export default function TypingIndicator({ visible }: TypingIndicatorProps) {
       <div
         className="relative flex items-center gap-1 px-4 py-3"
         style={{
-          backgroundColor: '#ffffff',
+          backgroundColor: c.incomingBubble,
           borderRadius: '4px',
+          border: c.incomingBorder !== 'transparent' ? `1px solid ${c.incomingBorder}` : 'none',
+          transition: 'background-color 240ms ease',
         }}
       >
         {/* Left triangle */}
@@ -36,7 +41,8 @@ export default function TypingIndicator({ visible }: TypingIndicatorProps) {
             height: 0,
             borderTop: '6px solid transparent',
             borderBottom: '6px solid transparent',
-            borderRight: '6px solid #ffffff',
+            borderRight: `6px solid ${c.incomingBubble}`,
+            transition: 'border-right-color 240ms ease',
           }}
         />
         {[0, 1, 2].map((i) => (
@@ -46,7 +52,7 @@ export default function TypingIndicator({ visible }: TypingIndicatorProps) {
             style={{
               width: '8px',
               height: '8px',
-              backgroundColor: '#999',
+              backgroundColor: c.timestamp,
               animation: `typing-bounce 1.4s ease-in-out ${i * 0.2}s infinite both`,
             }}
           />

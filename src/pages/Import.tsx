@@ -4,6 +4,7 @@ import { Upload, FileText, AlertCircle, CheckCircle, Loader2, ChevronRight, Clip
 import { parseTextChat } from '../services/parser/textParser';
 import { parseHTMLChat, buildFileMap } from '../services/parser';
 import NavBar from '../components/layout/NavBar';
+import ProfileLoadingOverlay from '../components/ProfileLoadingOverlay';
 import type { ParseResult } from '../services/parser/textParser';
 import type { HTMLParseResult } from '../services/parser/htmlParser';
 import { generateFromParsedData } from '../services/profileGenerator';
@@ -124,33 +125,38 @@ export default function ImportPage() {
     if (!generationResult || savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
-    const character: Character = {
-      id: `char_${Date.now()}`,
-      ...generationResult.character,
-      createdAt: new Date().toISOString(),
-      sourceType,
-    };
-    addCharacter(character);
-    await saveCharacter(character);
-    // 保存原始聊天记录（IF 线回放用）
-    if (parseResult?.messages?.length) {
-      await saveRawMessages(character.id, parseResult.messages);
+    try {
+      const character: Character = {
+        id: `char_${Date.now()}`,
+        ...generationResult.character,
+        createdAt: new Date().toISOString(),
+        sourceType,
+      };
+      addCharacter(character);
+      await saveCharacter(character);
+      if (parseResult?.messages?.length) {
+        await saveRawMessages(character.id, parseResult.messages);
+      }
+      if (generationResult.events.length > 0) {
+        const eventsWithIds = generationResult.events.map(e => ({
+          ...e,
+          id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          status: 'pending' as const,
+        }));
+        await saveTimelineEvents(character.id, eventsWithIds);
+      }
+      if (target === 'list') {
+        navigate('/characters');
+      } else {
+        navigate(`/characters/${character.id}/${target}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败，请重试');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
-    // 保存 IF 线事件
-    if (generationResult.events.length > 0) {
-      const eventsWithIds = generationResult.events.map(e => ({
-        ...e,
-        id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        status: 'pending' as const,
-      }));
-      await saveTimelineEvents(character.id, eventsWithIds);
-    }
-    if (target === 'list') {
-      navigate('/characters');
-    } else {
-      navigate(`/characters/${character.id}/${target}`);
-    }
-  }, [generationResult, parseResult, sourceType, addCharacter, navigate, saving]);
+  }, [generationResult, parseResult, sourceType, addCharacter, navigate]);
 
   // ─── Steps indicator ───
 
@@ -161,32 +167,39 @@ export default function ImportPage() {
   ];
   const currentStepIndex = steps.findIndex(s => s.key === step);
 
+  // Show full-screen loading overlay during LLM generation
+  const showLoadingOverlay = loading && step === 'confirm';
+
   return (
-    <div className="bg-surface text-on-surface min-h-screen">
-      {/* Nav */}
+    <div className="text-on-surface min-h-screen relative">
       <NavBar variant="solid" />
 
-      <main className="pt-24 pb-20 px-6 max-w-5xl mx-auto">
-        {/* Progress */}
-        <div className="flex justify-center items-center space-x-4 mb-10">
+      {/* Profile generation overlay */}
+      <ProfileLoadingOverlay visible={showLoadingOverlay} message={loadingText} />
+
+      <main className="relative z-10 pt-32 pb-24 px-8 md:px-16 lg:px-24 max-w-[1280px] mx-auto">
+        {/* Minimal progress indicator — eyebrow style */}
+        <div className="flex items-center gap-2 mb-8">
           {steps.map((s, i) => (
-            <div key={s.key} className="flex items-center">
-              <div className="flex flex-col items-center">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${
-                  i <= currentStepIndex
-                    ? 'bg-primary text-on-primary ring-4 ring-primary/20'
-                    : 'bg-surface-container-high text-on-surface-variant'
-                }`}>
-                  {i < currentStepIndex ? <CheckCircle size={16} /> : s.num}
-                </div>
-                <span className={`text-xs mt-2 tracking-wider ${
-                  i <= currentStepIndex ? 'font-semibold text-primary' : 'font-medium text-on-surface-variant'
-                }`}>
-                  {s.label}
-                </span>
-              </div>
+            <div key={s.key} className="flex items-center gap-2">
+              <span
+                className={`text-[11px] tracking-[0.18em] uppercase transition-colors ${
+                  i === currentStepIndex
+                    ? 'text-white'
+                    : i < currentStepIndex
+                    ? 'text-white/40'
+                    : 'text-white/20'
+                }`}
+              >
+                {i < currentStepIndex && <CheckCircle size={11} className="inline mr-1.5 -mt-0.5" />}
+                {String(s.num).padStart(2, '0')} · {s.label}
+              </span>
               {i < steps.length - 1 && (
-                <div className={`w-16 h-px mx-4 ${i < currentStepIndex ? 'bg-primary' : 'bg-outline-variant'}`} />
+                <span
+                  className={`w-8 h-px ${
+                    i < currentStepIndex ? 'bg-white/40' : 'bg-white/10'
+                  }`}
+                />
               )}
             </div>
           ))}
@@ -203,28 +216,31 @@ export default function ImportPage() {
         {/* Step 1: Import */}
         {step === 'import' && (
           <>
-            <h1 className="text-3xl font-extrabold tracking-tight mb-2 text-center">选择导入方式</h1>
-            <p className="text-secondary max-w-xl mx-auto leading-relaxed text-center mb-10">
-              把聊天记录导入进来，系统会自动分析对方的说话风格。
-            </p>
+            <header className="mb-12">
+              <p className="eyebrow mb-3">CHOOSE A METHOD · 挑一段对话</p>
+              <h1 className="text-h1 text-white">挑一段对话</h1>
+              <p className="mt-3 text-base text-white/55 max-w-xl">
+                把聊天记录导入进来，COPY CHAT 会自动分析 TA 的说话方式、口头禅和情绪习惯。
+              </p>
+            </header>
 
-            <div className="grid md:grid-cols-2 gap-8 items-stretch">
+            <div className="grid md:grid-cols-2 gap-6 items-stretch">
               {/* Text Paste */}
-              <div className="bg-surface-container-low rounded-xl p-8 flex flex-col">
+              <div className="card-glass p-8 flex flex-col">
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-primary shadow-sm">
-                    <ClipboardPaste size={20} />
+                  <div className="w-9 h-9 rounded-lg bg-white/[0.06] flex items-center justify-center text-white/70">
+                    <ClipboardPaste size={18} />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold" style={{ color: 'var(--color-primary)' }}>文本粘贴</h2>
-                    <p className="text-xs text-secondary font-medium">快速导入</p>
+                    <h2 className="text-base text-white/90 font-medium" style={{ fontFamily: 'var(--font-sans)' }}>文本粘贴</h2>
+                    <p className="text-xs text-white/40 mt-0.5">快速导入</p>
                   </div>
                 </div>
 
                 <div className="flex-grow">
-                  <label className="block text-sm font-semibold text-on-surface-variant mb-2">聊天记录</label>
+                  <label className="block text-[11px] tracking-[0.16em] uppercase text-white/40 mb-2">聊天记录</label>
                   <textarea
-                    className="w-full h-64 bg-surface-container-lowest rounded-lg p-4 text-sm text-on-surface focus:ring-2 focus:ring-primary-container transition-all placeholder:text-on-surface-variant outline-none"
+                    className="w-full h-64 bg-black/30 border border-white/[0.08] focus:border-white/20 rounded-lg p-4 text-sm text-on-surface transition-colors placeholder:text-white/25 outline-none resize-none"
                     placeholder={`从微信复制聊天记录，粘贴到这里...\n\n小林 14:32\n在吗\n\n我 14:33\n在呢怎么了\n\n小林 14:33\n周末有空吗 想去看电影`}
                     value={textValue}
                     onChange={(e) => setTextValue(e.target.value)}
@@ -232,14 +248,13 @@ export default function ImportPage() {
                 </div>
 
                 <div className="mt-6 flex flex-col gap-4">
-                  <div className="text-xs text-on-surface-variant leading-relaxed space-y-1">
-                    <p className="text-emerald-700 font-medium">支持：文字消息、时间、表情符号</p>
-                    <p className="text-on-surface-variant/60">不支持图片和视频（显示为占位符）</p>
+                  <div className="text-xs text-white/40 leading-relaxed">
+                    支持文字消息、时间戳和 emoji · 不支持图片视频
                   </div>
                   <button
                     onClick={handleParse}
                     disabled={loading || !textValue.trim()}
-                    className="w-full bg-primary text-on-primary py-4 rounded-md font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+                    className="btn-primary w-full inline-flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {loading ? <><Loader2 size={16} className="animate-spin" /> 解析中...</> : '解析聊天记录'}
                   </button>
@@ -247,22 +262,22 @@ export default function ImportPage() {
               </div>
 
               {/* HTML Upload */}
-              <div className="bg-surface-container-low rounded-xl p-8 flex flex-col">
+              <div className="card-glass p-8 flex flex-col">
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-secondary shadow-sm">
-                    <FolderOpen size={20} />
+                  <div className="w-9 h-9 rounded-lg bg-white/[0.06] flex items-center justify-center text-white/70">
+                    <Upload size={18} />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold" style={{ color: 'var(--color-primary)' }}>上传聊天文件</h2>
-                    <p className="text-xs text-secondary font-medium">完整解析</p>
+                    <h2 className="text-base text-white/90 font-medium" style={{ fontFamily: 'var(--font-sans)' }}>上传聊天文件</h2>
+                    <p className="text-xs text-white/40 mt-0.5">完整解析（含图片视频）</p>
                   </div>
                 </div>
 
-                <label className="block text-sm font-semibold text-on-surface-variant mb-2">聊天文件</label>
+                <label className="block text-[11px] tracking-[0.16em] uppercase text-white/40 mb-2">聊天文件</label>
                 <div
-                  className={`flex-grow flex flex-col border-2 border-dashed rounded-xl bg-surface-container-lowest/50 hover:bg-surface-container-lowest transition-colors cursor-pointer p-8 group overflow-y-auto ${
+                  className={`flex-grow flex flex-col border border-dashed rounded-xl bg-black/30 hover:bg-black/40 transition-all cursor-pointer p-8 group overflow-y-auto ${
                     selectedFiles.length > 0 ? 'items-start justify-start' : 'items-center justify-center text-center'
-                  } ${dragOver ? 'border-primary bg-surface-container-lowest' : 'border-emerald-900/10'}`}
+                  } ${dragOver ? 'border-white/40' : 'border-white/[0.10]'}`}
                   onDrop={handleDrop}
                   onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                   onDragLeave={() => setDragOver(false)}
@@ -271,22 +286,22 @@ export default function ImportPage() {
                   {selectedFiles.length > 0 ? (
                     <div className="w-full text-left" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs font-medium text-on-surface-variant">已选择 {selectedFiles.length} 个文件</p>
-                        <button onClick={() => fileInputRef.current?.click()} className="text-[10px] text-primary hover:underline">重新选择</button>
+                        <p className="text-xs text-white/55">已选择 {selectedFiles.length} 个文件</p>
+                        <button onClick={() => fileInputRef.current?.click()} className="text-[11px] text-white/70 hover:text-white transition-colors">重新选择</button>
                       </div>
                       <div className="max-h-40 overflow-y-auto space-y-2">
                         {selectedFiles.map((f, i) => (
-                          <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2.5 bg-surface-container border border-outline-variant/50">
-                            <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 bg-primary/10">
-                              <FileText size={15} className="text-primary" />
+                          <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2.5 bg-white/[0.04] border border-white/[0.06]">
+                            <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 bg-white/[0.06]">
+                              <FileText size={14} className="text-white/55" />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm text-on-surface truncate">{f.name}</p>
-                              <p className="text-[10px] text-on-surface-variant mt-0.5">{(f.size / 1024).toFixed(0)} KB</p>
+                              <p className="text-sm text-white/85 truncate">{f.name}</p>
+                              <p className="text-[10px] text-white/40 mt-0.5">{(f.size / 1024).toFixed(0)} KB</p>
                             </div>
                             <button
                               onClick={() => setSelectedFiles(prev => prev.filter((_, idx) => idx !== i))}
-                              className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-error/10 hover:text-error transition-colors"
+                              className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-white/40 hover:bg-white/10 hover:text-white transition-colors"
                             >
                               <X size={13} />
                             </button>
@@ -296,23 +311,23 @@ export default function ImportPage() {
                     </div>
                   ) : (
                     <>
-                      <div className="mb-4 text-emerald-800/40 group-hover:text-primary transition-colors">
-                        <Upload size={56} />
+                      <div className="mb-4 text-white/25 group-hover:text-white/55 transition-colors">
+                        <Upload size={48} strokeWidth={1.5} />
                       </div>
-                      <p className="text-sm font-bold text-on-surface mb-1">把文件夹拖到这里</p>
-                      <p className="text-xs text-on-surface-variant mb-6">支持 WeFlow 导出的 HTML + 资源文件夹</p>
-                      <div className="flex gap-3 justify-center">
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700">
-                          <Image size={14} />
-                          <span className="text-[10px] font-bold">图片</span>
+                      <p className="text-sm text-white/80 mb-1">把文件夹拖到这里</p>
+                      <p className="text-xs text-white/40 mb-6">支持 WeFlow 导出的 HTML + 资源文件夹</p>
+                      <div className="flex gap-2 justify-center">
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.06] text-white/60">
+                          <Image size={12} />
+                          <span className="text-[10px]">图片</span>
                         </div>
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700">
-                          <Video size={14} />
-                          <span className="text-[10px] font-bold">视频</span>
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.06] text-white/60">
+                          <Video size={12} />
+                          <span className="text-[10px]">视频</span>
                         </div>
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700">
-                          <MessageSquare size={14} />
-                          <span className="text-[10px] font-bold">文字</span>
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.06] text-white/60">
+                          <MessageSquare size={12} />
+                          <span className="text-[10px]">文字</span>
                         </div>
                       </div>
                     </>
@@ -322,21 +337,18 @@ export default function ImportPage() {
                 <input ref={fileInputRef} type="file" accept=".html,.htm" multiple className="hidden" onChange={(e) => { if (e.target.files) handleFileSelect(e.target.files); }} />
 
                 <div className="mt-6 flex flex-col gap-4">
-                  <div className="text-xs text-on-surface-variant leading-relaxed space-y-1">
-                    <p className="text-emerald-700 font-medium">支持：文字、图片、视频全部内容</p>
-                  </div>
-                  <div className="flex items-start gap-2.5 rounded-lg px-3 py-2.5 bg-emerald-500/8 border border-emerald-500/20">
-                    <span className="text-emerald-600 mt-0.5 shrink-0">↗</span>
-                    <p className="text-xs text-on-surface-variant leading-relaxed">
+                  <div className="flex items-start gap-2.5 rounded-lg px-3 py-2.5 bg-white/[0.03] border border-white/[0.08]">
+                    <span className="text-white/40 mt-0.5 shrink-0">↗</span>
+                    <p className="text-xs text-white/55 leading-relaxed">
                       导出前需先安装{' '}
-                      <a href="https://github.com/hicccc77/WeFlow" target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-700 underline underline-offset-2 hover:opacity-80">WeFlow</a>
-                      {' '}，将微信聊天记录导出为 HTML 文件夹后再上传
+                      <a href="https://github.com/hicccc77/WeFlow" target="_blank" rel="noopener noreferrer" className="text-white/85 underline underline-offset-2 hover:text-white transition-colors">WeFlow</a>
+                      ，将微信聊天记录导出为 HTML 文件夹后再上传
                     </p>
                   </div>
                   <button
                     onClick={handleParse}
                     disabled={loading || selectedFiles.length === 0}
-                    className="w-full bg-secondary text-on-secondary py-4 rounded-md font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+                    className="w-full bg-white/[0.06] hover:bg-white/[0.10] text-white py-3 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
                   >
                     {loading ? <><Loader2 size={16} className="animate-spin" /> 解析中...</> : '选择文件'}
                   </button>
@@ -348,59 +360,64 @@ export default function ImportPage() {
 
         {/* Step 2: Confirm */}
         {step === 'confirm' && parseResult && (
-          <div className="max-w-2xl mx-auto">
-            <h1 className="text-3xl font-extrabold tracking-tight mb-2 text-center">确认解析结果</h1>
-            <p className="text-secondary max-w-xl mx-auto leading-relaxed text-center mb-10">
-              以下是从聊天记录中解析出的信息，确认无误后生成画像。
-            </p>
+          <div className="max-w-3xl mx-auto">
+            <header className="mb-10">
+              <p className="eyebrow mb-3">CONFIRM · 确认解析结果</p>
+              <h1 className="text-h1 text-white">检查一下</h1>
+              <p className="mt-3 text-base text-white/55">
+                以下是从聊天记录中解析出的信息，确认无误后生成画像。
+              </p>
+            </header>
 
-            <div className="bg-surface-container-lowest rounded-xl p-6 border border-outline-variant">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div className="text-center p-3 rounded-lg bg-surface-container-low flex flex-col">
-                  <p className="text-2xl font-bold text-primary flex-1 flex items-end justify-center">{parseResult.totalMessages}</p>
-                  <p className="text-xs text-on-surface-variant mt-1">消息数</p>
+            <div className="card-glass p-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                <div className="p-4 rounded-lg bg-white/[0.03]">
+                  <p className="text-2xl text-white font-medium" style={{ fontFeatureSettings: '"tnum" 1' }}>{parseResult.totalMessages}</p>
+                  <p className="text-[11px] text-white/40 mt-1 tracking-wider uppercase">消息数</p>
                 </div>
-                <div className="text-center p-3 rounded-lg bg-surface-container-low flex flex-col">
-                  <p className="text-base font-bold text-secondary flex-1 flex items-end justify-center">{parseResult.participants.other}</p>
-                  <p className="text-xs text-on-surface-variant mt-1">对方昵称</p>
+                <div className="p-4 rounded-lg bg-white/[0.03]">
+                  <p className="text-base text-white/85 truncate">{parseResult.participants.other}</p>
+                  <p className="text-[11px] text-white/40 mt-1 tracking-wider uppercase">对方</p>
                 </div>
-                <div className="text-center p-3 rounded-lg bg-surface-container-low flex flex-col">
-                  <p className="text-sm font-bold text-on-surface flex-1 flex items-end justify-center">{parseResult.startDate || '未知'}</p>
-                  <p className="text-xs text-on-surface-variant mt-1">起始日期</p>
+                <div className="p-4 rounded-lg bg-white/[0.03]">
+                  <p className="text-sm text-white/85" style={{ fontFeatureSettings: '"tnum" 1' }}>{parseResult.startDate || '未知'}</p>
+                  <p className="text-[11px] text-white/40 mt-1 tracking-wider uppercase">起始</p>
                 </div>
-                <div className="text-center p-3 rounded-lg bg-surface-container-low flex flex-col">
-                  <p className="text-sm font-bold text-on-surface flex-1 flex items-end justify-center">{parseResult.endDate || '未知'}</p>
-                  <p className="text-xs text-on-surface-variant mt-1">结束日期</p>
+                <div className="p-4 rounded-lg bg-white/[0.03]">
+                  <p className="text-sm text-white/85" style={{ fontFeatureSettings: '"tnum" 1' }}>{parseResult.endDate || '未知'}</p>
+                  <p className="text-[11px] text-white/40 mt-1 tracking-wider uppercase">结束</p>
                 </div>
               </div>
 
-              <h3 className="text-sm font-medium mb-2 text-on-surface-variant">消息预览（前 10 条）</h3>
-              <div className="space-y-2 max-h-48 overflow-y-auto mb-6">
+              <p className="text-[11px] tracking-[0.16em] uppercase text-white/40 mb-3">前 10 条预览</p>
+              <div className="space-y-2 max-h-48 overflow-y-auto mb-6 text-sm">
                 {parseResult.messages.slice(0, 10).map((msg) => (
-                  <div key={msg.id} className="flex gap-2 text-sm">
-                    <span className="font-medium shrink-0 text-primary">{msg.sender === 'user' ? '我' : parseResult.participants.other}</span>
-                    <span className="text-on-surface">{msg.content}</span>
+                  <div key={msg.id} className="flex gap-2">
+                    <span className="shrink-0 text-white/40 w-12">{msg.sender === 'user' ? '我' : parseResult.participants.other}</span>
+                    <span className="text-white/80">{msg.content}</span>
                   </div>
                 ))}
               </div>
 
               {!getActiveConfig() && (
-                <div className="p-3 rounded-lg mb-4 flex items-center gap-2 bg-error/10 text-error">
+                <div className="p-3 rounded-lg mb-4 flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400">
                   <AlertCircle size={16} />
                   <span className="text-sm">请先在设置中配置 LLM API，否则无法生成画像</span>
                 </div>
               )}
 
               <div className="flex gap-3">
-                <button onClick={() => setStep('import')} className="px-6 py-2.5 rounded-md text-sm font-medium bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors">
+                <button onClick={() => setStep('import')} className="px-5 py-2.5 rounded-lg text-sm font-medium bg-white/[0.05] hover:bg-white/[0.10] text-white/80 transition-colors">
                   返回修改
                 </button>
                 <button
                   onClick={handleGenerate}
                   disabled={loading || !getActiveConfig()}
-                  className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-primary text-on-primary flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="btn-primary flex-1 inline-flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  {loading ? <><Loader2 size={16} className="animate-spin" /> {loadingText}</> : <><FileText size={16} /> 生成画像 <ChevronRight size={14} /></>}
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+                  {loading ? '生成中…' : '生成画像'}
+                  {!loading && <ChevronRight size={14} />}
                 </button>
               </div>
             </div>
@@ -409,71 +426,62 @@ export default function ImportPage() {
 
         {/* Step 3: Done */}
         {step === 'done' && generationResult && (
-          <div className="max-w-2xl mx-auto">
-            <div className="bg-surface-container-lowest rounded-xl p-8 border border-outline-variant text-center">
-              <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-primary">
-                <CheckCircle size={32} className="text-on-primary" />
-              </div>
-              <h2 className="text-xl font-bold text-on-surface mb-1">画像已生成</h2>
-              <p className="text-sm text-on-surface-variant mb-6">{generationResult.character.identity.name} 的画像已就绪</p>
+          <div className="max-w-3xl mx-auto">
+            <header className="mb-10">
+              <p className="eyebrow mb-3">READY · 还原完成</p>
+              <h1 className="text-h1 text-white">
+                {generationResult.character.identity.name}
+                <span className="text-white/30"> · 已就位</span>
+              </h1>
+              <p className="mt-3 text-base text-white/55">画像已生成，可以开始对话了。</p>
+            </header>
 
-              <div className="space-y-3 text-left mb-6">
-                <div className="p-3 rounded-lg bg-surface-container-low">
-                  <h3 className="text-xs font-medium mb-1 text-on-surface-variant">身份</h3>
-                  <p className="text-sm text-on-surface">
+            <div className="card-glass p-6">
+              <div className="space-y-3 mb-6">
+                <div className="p-4 rounded-lg bg-white/[0.03]">
+                  <p className="text-[11px] tracking-[0.16em] uppercase text-white/40 mb-1.5">身份</p>
+                  <p className="text-sm text-white/85">
                     {generationResult.character.identity.name}
                     {generationResult.character.identity.ageEstimate && ` · ${generationResult.character.identity.ageEstimate}`}
                     {generationResult.character.identity.occupationHint && ` · ${generationResult.character.identity.occupationHint}`}
                   </p>
                 </div>
-                <div className="p-3 rounded-lg bg-surface-container-low">
-                  <h3 className="text-xs font-medium mb-1 text-on-surface-variant">性格标签</h3>
-                  <div className="flex flex-wrap gap-1">
+                <div className="p-4 rounded-lg bg-white/[0.03]">
+                  <p className="text-[11px] tracking-[0.16em] uppercase text-white/40 mb-2">性格标签</p>
+                  <div className="flex flex-wrap gap-1.5">
                     {generationResult.character.persona.personalityTags.map((tag, i) => (
-                      <span key={i} className="px-2 py-0.5 rounded-full text-xs bg-secondary-container text-on-secondary-container">{tag}</span>
+                      <span key={i} className="px-2.5 py-0.5 rounded-full text-xs bg-white/[0.06] text-white/75">{tag}</span>
                     ))}
                   </div>
                 </div>
-                <div className="p-3 rounded-lg bg-surface-container-low">
-                  <h3 className="text-xs font-medium mb-1 text-on-surface-variant">时间轴事件（{generationResult.events.length} 个）</h3>
+                <div className="p-4 rounded-lg bg-white/[0.03]">
+                  <p className="text-[11px] tracking-[0.16em] uppercase text-white/40 mb-2">时间轴事件 · {generationResult.events.length}</p>
                   <div className="space-y-1 max-h-32 overflow-y-auto">
                     {generationResult.events.slice(0, 5).map((ev, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs">
-                        <span className="text-secondary">{ev.date}</span>
-                        <span className="text-on-surface">{ev.summary}</span>
+                      <div key={i} className="flex items-center gap-3 text-xs">
+                        <span className="text-white/45 shrink-0" style={{ fontFeatureSettings: '"tnum" 1' }}>{ev.date}</span>
+                        <span className="text-white/80 truncate">{ev.summary}</span>
                       </div>
                     ))}
                     {generationResult.events.length > 5 && (
-                      <p className="text-xs text-on-surface-variant">... 还有 {generationResult.events.length - 5} 个事件</p>
+                      <p className="text-xs text-white/30">… 还有 {generationResult.events.length - 5} 个</p>
                     )}
                   </div>
                 </div>
               </div>
 
               <div className="flex gap-3">
-                <button disabled={saving} onClick={() => saveCharacter_('edit')} className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                  {saving ? '保存中...' : '查看画像（可编辑）'}
+                <button disabled={saving} onClick={() => saveCharacter_('edit')} className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium bg-white/[0.05] hover:bg-white/[0.10] text-white/80 transition-colors disabled:opacity-50">
+                  {saving ? '保存中...' : '查看画像'}
                 </button>
-                <button disabled={saving} onClick={() => saveCharacter_('chat')} className="flex-1 px-4 py-2.5 rounded-md text-sm font-medium bg-primary text-on-primary disabled:opacity-50 disabled:cursor-not-allowed">
-                  {saving ? '保存中...' : '确认并开始聊天'}
+                <button disabled={saving} onClick={() => saveCharacter_('chat')} className="btn-primary flex-1 inline-flex items-center justify-center gap-2 disabled:opacity-50">
+                  {saving ? '保存中...' : '开始聊天'}
                 </button>
               </div>
             </div>
           </div>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="w-full py-8 border-t border-outline-variant bg-surface">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center px-8 space-y-4 md:space-y-0">
-          <div className="text-xs text-on-surface-variant">© 2026 Copy Chat</div>
-          <div className="flex space-x-8">
-            <span className="text-xs text-on-surface-variant">隐私</span>
-            <span className="text-xs text-on-surface-variant">条款</span>
-            <span className="text-xs text-on-surface-variant">帮助</span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

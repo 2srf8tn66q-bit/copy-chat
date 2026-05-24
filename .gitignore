@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# 大视频素材，不入库（部署前需单独上传到 public/）
+public/*.mp4
+public/*.mp4.bak
+
+# 本地项目 Claude 配置
+.claude/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

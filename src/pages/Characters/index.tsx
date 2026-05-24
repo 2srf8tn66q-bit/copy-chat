@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, User, Users, Settings, Trash2 } from 'lucide-react';
+import { Plus, Search, User, Trash2, ArrowRight, Settings as SettingsIcon } from 'lucide-react';
 import { getAllCharacters, deleteCharacter } from '../../services/storage';
 import { useCharacterStore } from '../../stores/characterStore';
 import NavBar from '../../components/layout/NavBar';
+import PageHeader from '../../components/PageHeader';
+import FadeImage from '../../components/FadeImage';
+import Tooltip from '../../components/Tooltip';
 import type { Character } from '../../types/character';
 
 export default function CharactersPage() {
@@ -25,152 +28,215 @@ export default function CharactersPage() {
     c.identity.name.toLowerCase().includes(search.toLowerCase()),
   );
 
+  const isEmpty = characters.length === 0;
+
   return (
-    <div className="min-h-screen bg-surface text-on-surface">
-      {/* Nav */}
+    <div className="min-h-screen text-on-surface relative">
       <NavBar variant="solid" />
 
-      <main className="pt-20 pb-20 px-6 md:px-8 max-w-5xl mx-auto">
-        {/* Header */}
-        <header className="flex flex-col md:flex-row md:items-end justify-between gap-5 mb-10">
-          <div className="max-w-xl">
-            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-2 text-on-surface">
-              创建角色
-            </h1>
-            <p className="text-sm text-secondary">
-              每个人都是根据真实聊天记录生成的。
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索角色..."
-                className="pl-9 pr-4 py-2 bg-surface-container-low rounded-md text-sm outline-none w-56 md:w-64 focus:ring-1 focus:ring-primary text-on-surface placeholder:text-outline"
-              />
-            </div>
-            <button
-              onClick={() => navigate('/import')}
-              className="inline-flex items-center gap-1.5 bg-primary text-on-primary px-4 py-2 rounded-md text-sm font-medium hover:scale-[1.02] active:scale-95 transition-all"
-            >
-              <Plus size={14} />
-              导入角色
-            </button>
-          </div>
-        </header>
-
-        {/* Characters */}
-        <section className="mb-14">
-          <h2 className="text-lg font-bold tracking-tight mb-5 text-primary">角色</h2>
-
-          {filtered.length === 0 ? (
-            <div className="text-center py-16">
-              <p className="text-sm mb-2 text-on-surface-variant">
-                {characters.length === 0 ? '还没有角色' : '没有匹配的角色'}
-              </p>
-              {characters.length === 0 && (
-                <button
-                  onClick={() => navigate('/import')}
-                  className="inline-flex items-center gap-1.5 bg-primary text-on-primary px-4 py-2 rounded-md text-sm font-medium mt-3 hover:scale-[1.02] hover:shadow-md hover:shadow-primary/25 active:scale-95 transition-all"
-                >
+      <main className="relative z-10 pt-32 pb-24 px-8 md:px-16 lg:px-24 max-w-[1280px] mx-auto">
+        {/* ── PageHeader ── */}
+        <PageHeader
+          eyebrow={`CHARACTERS · 角色${characters.length > 0 ? ` · ${characters.length}` : ''}`}
+          title="你的角色"
+          subtitle="每一个都从真实聊天记录里被还原出来。"
+          action={
+            !isEmpty && (
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="搜索"
+                    className="pl-9 pr-4 py-2 bg-white/[0.03] border border-white/[0.08] rounded-md text-sm outline-none w-48 focus:border-white/20 text-on-surface placeholder:text-white/25 transition-colors"
+                  />
+                </div>
+                <button onClick={() => navigate('/import')} className="btn-primary inline-flex items-center gap-1.5">
                   <Plus size={14} />
-                  导入第一个角色
+                  导入
                 </button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filtered.map((char) => (
-                <CharacterCard key={char.id} character={char} onNavigate={navigate} onDelete={async (id) => {
-                  await deleteCharacter(id);
-                  removeCharacter(id);
-                  setCharacters(prev => prev.filter(c => c.id !== id));
-                }} />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Group Chats */}
-        <section>
-          <h2 className="text-lg font-bold tracking-tight mb-5 text-primary">群聊</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <button
-              onClick={() => navigate('/groups')}
-              className="p-5 rounded-xl flex flex-col items-center justify-center text-center border-2 border-dashed border-outline-variant bg-surface hover:bg-surface-container-low transition-colors"
-            >
-              <div className="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center mb-2">
-                <Users size={18} className="text-outline" />
               </div>
-              <h3 className="font-bold text-sm text-on-surface">创建群聊</h3>
-              <p className="text-xs mt-1 text-outline">选几个角色拉一个群</p>
-            </button>
-          </div>
-        </section>
-      </main>
+            )
+          }
+        />
 
-      {/* Footer */}
-      <footer className="w-full py-6 px-6 md:px-8 border-t border-outline-variant bg-surface">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <span className="text-xs text-outline">&copy; 2026 Copy Chat</span>
-          <button
-            onClick={() => navigate('/settings')}
-            className="flex items-center gap-1 text-xs text-outline hover:text-on-surface-variant transition-colors"
-          >
-            <Settings size={12} />
-            设置
-          </button>
-        </div>
-      </footer>
+        {/* ── Empty state — full-bleed image with overlay text ── */}
+        {isEmpty ? (
+          <EmptyCharactersState onImport={() => navigate('/import')} />
+        ) : (
+          <section>
+            {filtered.length === 0 ? (
+              <div className="py-20 text-center">
+                <p className="text-sm text-white/40">没有匹配的角色</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {filtered.map((char, i) => (
+                  <CharacterCard
+                    key={char.id}
+                    character={char}
+                    delay={i * 60}
+                    onNavigate={navigate}
+                    onDelete={async (id) => {
+                      await deleteCharacter(id);
+                      removeCharacter(id);
+                      setCharacters((prev) => prev.filter((c) => c.id !== id));
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+      </main>
     </div>
   );
 }
 
-function CharacterCard({ character, onNavigate, onDelete }: { character: Character; onNavigate: (path: string) => void; onDelete: (id: string) => void }) {
+// ─── Empty state with hero image ──────────────────────
+
+function EmptyCharactersState({ onImport }: { onImport: () => void }) {
   return (
-    <div className="bg-surface-container-lowest p-5 rounded-xl border border-transparent hover:border-outline-variant transition-colors">
-      <div className="flex items-center gap-3.5">
-        <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-surface-container-highest border border-surface-container-high flex items-center justify-center">
+    <div
+      className="relative rounded-2xl overflow-hidden mt-8 anim-fade-up-lg delay-200"
+      style={{ aspectRatio: '16 / 9', minHeight: '420px' }}
+    >
+      {/* Background image (full bleed) */}
+      <img
+        src="/empty-characters.png"
+        alt=""
+        className="absolute inset-0 w-full h-full object-cover"
+        style={{ objectPosition: 'center' }}
+      />
+
+      {/* Gradient overlay — strengthens left dark, lets right green shine */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(to right, rgba(10,10,11,0.92) 0%, rgba(10,10,11,0.70) 35%, rgba(10,10,11,0.20) 70%, rgba(10,10,11,0.10) 100%)',
+        }}
+      />
+
+      {/* Overlay content */}
+      <div className="relative h-full flex items-center px-10 md:px-16 lg:px-20">
+        <div className="max-w-md">
+          <p className="eyebrow mb-3 anim-fade-in delay-500">EMPTY · 还没人在</p>
+          <h2 className="text-h1 text-white anim-fade-up delay-700">TA 还没出现</h2>
+          <p className="mt-4 text-base text-white/60 leading-relaxed anim-fade-in delay-900">
+            导入你和某个人的聊天记录，<br />
+            在这里和 TA 重新对话。
+          </p>
+          <button
+            onClick={onImport}
+            className="mt-8 inline-flex items-center gap-2 text-white text-[15px] group anim-fade-in delay-900"
+            style={{ cursor: 'pointer', animationDelay: '1100ms' }}
+          >
+            <span className="border-b border-white/40 group-hover:border-white pb-0.5 transition-colors">
+              导入聊天
+            </span>
+            <ArrowRight
+              size={16}
+              className="transition-transform duration-300 group-hover:translate-x-1.5"
+              style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}
+            />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Character card ──────────────────────────────────
+
+function CharacterCard({
+  character,
+  onNavigate,
+  onDelete,
+  delay = 0,
+}: {
+  character: Character;
+  onNavigate: (path: string) => void;
+  onDelete: (id: string) => void;
+  delay?: number;
+}) {
+  const sourceLabel =
+    character.sourceType === 'text-paste' ? '文本导入'
+    : character.sourceType === 'html-upload' ? '文件导入'
+    : '手动创建';
+
+  return (
+    <div
+      className="card-glass p-7 group anim-fade-up flex flex-col"
+      style={{ animationDelay: `${delay}ms`, minHeight: '380px' }}
+    >
+      {/* Top corner actions — only visible on hover */}
+      <div className="flex items-center justify-end gap-1 -mt-2 -mr-2 mb-1 h-7">
+        <Tooltip label="编辑画像" placement="bottom">
+          <button
+            onClick={() => onNavigate(`/characters/${character.id}/edit`)}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-white/30 hover:bg-white/10 hover:text-white/80 opacity-0 group-hover:opacity-100 transition-all"
+            aria-label="编辑画像"
+          >
+            <SettingsIcon size={15} />
+          </button>
+        </Tooltip>
+        <Tooltip label="删除角色" placement="bottom">
+          <button
+            onClick={() => {
+              if (confirm(`确定删除「${character.identity.name}」？`)) onDelete(character.id);
+            }}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-white/30 hover:bg-white/10 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+            aria-label="删除"
+          >
+            <Trash2 size={15} />
+          </button>
+        </Tooltip>
+      </div>
+
+      {/* Centered avatar + identity */}
+      <div className="flex flex-col items-center text-center flex-1 justify-center pb-2">
+        <div className="w-20 h-20 rounded-2xl overflow-hidden bg-white/5 border border-white/[0.08] flex items-center justify-center mb-5">
           {character.identity.avatar ? (
-            <img src={character.identity.avatar} alt="" className="w-full h-full object-cover" />
+            <FadeImage src={character.identity.avatar} alt="" className="w-full h-full object-cover" />
           ) : (
-            <User size={24} className="text-outline opacity-40" />
+            <User size={32} className="text-white/30" />
           )}
         </div>
-        <div className="flex-1 min-w-0">
-          <h4 className="font-bold text-base text-on-surface">{character.identity.name}</h4>
-          <p className="text-xs text-outline">
-            {character.sourceType === 'text-paste' ? '文本导入' : character.sourceType === 'html-upload' ? '文件导入' : '手动创建'}
-          </p>
-        </div>
-        <button
-          onClick={() => { if (confirm(`确定删除「${character.identity.name}」？`)) onDelete(character.id); }}
-          className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-outline hover:bg-error/10 hover:text-error transition-colors"
+        <h3
+          className="text-[20px] text-white/95 truncate max-w-full px-4"
+          style={{ fontFamily: 'var(--font-serif)', letterSpacing: '-0.01em' }}
         >
-          <Trash2 size={15} />
-        </button>
+          {character.identity.name}
+        </h3>
+        {character.relationshipToUser && (
+          <p className="text-xs text-white/40 mt-1.5 tracking-wide">
+            {character.relationshipToUser}
+          </p>
+        )}
+        <p className="eyebrow mt-3 text-[10px] text-white/25">
+          {sourceLabel}
+        </p>
       </div>
-      <div className="mt-4 flex gap-2">
+
+      {/* Action buttons — vertical stack for clean hierarchy */}
+      <div className="flex flex-col gap-2 mt-4">
         <button
           onClick={() => onNavigate(`/characters/${character.id}/chat`)}
-          className="flex-1 py-2 rounded-md text-xs font-bold bg-primary text-on-primary"
+          className="w-full py-2.5 rounded-lg text-sm font-semibold text-white inline-flex items-center justify-center gap-1.5 group/btn transition-all hover:brightness-110 active:scale-[0.98]"
+          style={{ backgroundColor: 'var(--color-primary)' }}
         >
-          聊天
+          开始聊天
+          <ArrowRight size={14} className="group-hover/btn:translate-x-0.5 transition-transform" />
         </button>
         <button
           onClick={() => onNavigate(`/characters/${character.id}/timeline`)}
-          className="flex-1 py-2 rounded-md text-xs font-bold bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors"
+          className="w-full py-2.5 rounded-lg text-sm font-medium text-white/80 border border-white/15 hover:border-white/30 hover:text-white hover:bg-white/[0.03] active:scale-[0.98] transition-all"
         >
           IF 线
-        </button>
-        <button
-          onClick={() => onNavigate(`/characters/${character.id}/edit`)}
-          className="px-3 py-2 rounded-md text-xs font-bold bg-surface-container-high text-on-surface hover:bg-surface-container-highest transition-colors"
-        >
-          画像
         </button>
       </div>
     </div>

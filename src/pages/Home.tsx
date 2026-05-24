@@ -7,8 +7,6 @@ import NavBar from '../components/layout/NavBar';
 import { useLLMStore } from '../stores/llmStore';
 import { ChatMockup, TimelineMockup, GroupChatMockup } from '../components/Mockups';
 import TypewriterText from '../components/TypewriterText';
-import ParticleCanvas from '../components/ParticleCanvas';
-import GrainOverlay from '../components/GrainOverlay';
 import FanCards from '../components/FanCards';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -73,18 +71,44 @@ export default function HomePage() {
   }, []);
 
   return (
-    <div className="bg-surface text-on-surface min-h-screen">
-      <ParticleCanvas />
-      <GrainOverlay />
+    <div className="text-on-surface min-h-screen">
       <NavBar variant="glass" />
 
       <main className="relative" style={{ zIndex: 2 }}>
         {/* ── Hero ── */}
-        <section className="min-h-screen flex items-center px-8 md:px-16 lg:px-24 pt-16">
-          <div className="max-w-[80rem] mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-            {/* Left: text — 7 cols */}
-            <div className="lg:col-span-7">
-              <h1 className="text-[clamp(2.5rem,7vw,6.5rem)] font-black leading-[0.95] tracking-tight mb-8">
+        <section className="relative isolate min-h-screen flex items-center px-8 md:px-16 lg:px-24 pt-16 overflow-hidden">
+          {/* Background video — sits behind everything in hero */}
+          <video
+            src="/hero-bg.mp4"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+            style={{
+              zIndex: 0,
+              opacity: 0.55,
+              maskImage:
+                'linear-gradient(to bottom, transparent 0%, black 12%, black 80%, transparent 100%)',
+              WebkitMaskImage:
+                'linear-gradient(to bottom, transparent 0%, black 12%, black 80%, transparent 100%)',
+            }}
+          />
+          {/* Right-side accent gradient — reinforces video focus on right */}
+          <div
+            aria-hidden
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              zIndex: 0,
+              background:
+                'radial-gradient(ellipse 60% 70% at 75% 50%, rgba(15,168,118,0.08) 0%, transparent 70%)',
+            }}
+          />
+
+          <div className="relative z-10 max-w-[80rem] mx-auto w-full">
+            <div className="max-w-3xl">
+              <h1 className="text-[clamp(3rem,8.5vw,7.5rem)] font-black leading-[0.95] tracking-tight mb-8">
                 <TypewriterText text="还记得" speed={75} delay={800} onComplete={() => setLine1Done(true)} showCursor={!line1Done} />
                 <br />
                 {line1Done && (
@@ -118,50 +142,6 @@ export default function HomePage() {
                   {hasLLM ? '创建角色' : '开始'}
                   <ArrowRight size={14} className="group-hover:translate-x-2 transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]" />
                 </button>
-              </div>
-            </div>
-
-            {/* Right: SVG animation — 5 cols */}
-            <div className="lg:col-span-5 flex justify-center lg:justify-end">
-              <div className="w-64 h-64 md:w-80 md:h-80">
-                <svg viewBox="0 0 240 240" className="w-full h-full overflow-visible">
-                  <g style={{ animation: 'pulse-halo 6s ease-in-out infinite', transformOrigin: 'center', transformBox: 'fill-box' }}>
-                    <circle cx="120" cy="140" r="90" stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" fill="none" strokeDasharray="6 8" />
-                    <circle cx="120" cy="140" r="115" stroke="rgba(255,255,255,0.04)" strokeWidth="1" fill="none" />
-                  </g>
-                  <g style={{ animation: 'float-phone 5s ease-in-out infinite', transformOrigin: 'center' }}>
-                    <g transform="rotate(8 120 160)">
-                      <rect x="80" y="85" width="80" height="155" rx="14" fill="#1a1a1a" stroke="#ffffff" strokeWidth="1.5" />
-                      <rect x="87" y="92" width="66" height="141" rx="8" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
-                      <line x1="108" y1="102" x2="132" y2="102" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                      <g opacity="0.5">
-                        <rect x="94" y="120" width="30" height="5" rx="2.5" fill="rgba(255,255,255,0.4)" />
-                        <rect x="114" y="132" width="32" height="5" rx="2.5" fill="#0DB152" />
-                        <rect x="94" y="144" width="45" height="5" rx="2.5" fill="rgba(255,255,255,0.4)" />
-                      </g>
-                      <rect x="156" y="115" width="13" height="24" rx="6.5" fill="#1a1a1a" stroke="#ffffff" strokeWidth="1.5" />
-                      <rect x="158" y="145" width="13" height="24" rx="6.5" fill="#1a1a1a" stroke="#ffffff" strokeWidth="1.5" />
-                      <rect x="157" y="175" width="13" height="24" rx="6.5" fill="#1a1a1a" stroke="#ffffff" strokeWidth="1.5" />
-                      <rect x="62" y="145" width="22" height="60" rx="11" transform="rotate(35 74 177)" fill="#1a1a1a" stroke="#ffffff" strokeWidth="1.5" />
-                      <path d="M 66 175 Q 74 178, 82 175" transform="rotate(35 74 177)" stroke="rgba(255,255,255,0.3)" strokeWidth="1" fill="none" strokeLinecap="round" />
-                      <path d="M 70 195 C 65 215, 65 240, 65 240" fill="none" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" />
-                    </g>
-                  </g>
-                  <g style={{ animation: 'float-chat-left 6.5s ease-in-out infinite', transformOrigin: 'center' }}>
-                    <rect x="25" y="45" width="85" height="40" rx="10" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
-                    <line x1="40" y1="57" x2="95" y2="57" stroke="rgba(255,255,255,0.3)" strokeWidth="3" strokeLinecap="round" />
-                    <line x1="40" y1="70" x2="75" y2="70" stroke="rgba(255,255,255,0.3)" strokeWidth="3" strokeLinecap="round" />
-                  </g>
-                  <g style={{ animation: 'float-chat-right 4.5s ease-in-out infinite', transformOrigin: 'center' }}>
-                    <rect x="120" y="10" width="95" height="40" rx="10" fill="#0DB152" opacity="0.9" />
-                    <line x1="135" y1="23" x2="200" y2="23" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.85" />
-                    <line x1="135" y1="36" x2="175" y2="36" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.85" />
-                  </g>
-                  <g style={{ animation: 'spin-star 3s ease-in-out infinite', transformOrigin: 'center', transformBox: 'fill-box' }}>
-                    <circle cx="215" cy="15" r="3" fill="#0DB152" opacity="0.7" />
-                    <circle cx="228" cy="28" r="1.5" fill="#0DB152" opacity="0.5" />
-                  </g>
-                </svg>
               </div>
             </div>
           </div>
@@ -212,7 +192,7 @@ export default function HomePage() {
                         <g style={{ animation: 'float-down 5s ease-in-out infinite' }}>
                           <rect x="150" y="70" width="66" height="52" rx="12" stroke="#ffffff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-3 7s ease-in-out infinite' }} />
                           <path d="M 160 122 L 160 134 L 172 122" stroke="#ffffff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-3 7s ease-in-out infinite' }} />
-                          <path d="M 183 83 Q 183 90, 176 90 Q 183 90, 183 97 Q 183 90, 190 90 Q 183 90, 183 83" fill="#0DB152" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
+                          <path d="M 183 83 Q 183 90, 176 90 Q 183 90, 183 97 Q 183 90, 190 90 Q 183 90, 183 83" fill="#0FA876" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
                         </g>
                       </svg>
                     </div>
@@ -242,9 +222,9 @@ export default function HomePage() {
                           <path d="M 30 190 Q 90 190, 110 130 T 190 90" stroke="#ffffff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-1 7s ease-in-out infinite' }} />
                           <circle cx="110" cy="130" r="16" stroke="#ffffff" strokeWidth="2" fill="#1a1a1c" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-1 7s ease-in-out infinite' }} />
                           <path d="M 104 125 A 6 6 0 1 0 110 122 L 106 118" stroke="#ffffff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-2 7s ease-in-out infinite' }} />
-                          <path d="M 110 114 Q 110 50, 170 40" stroke="#0DB152" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-3 7s ease-in-out infinite' }} />
-                          <line x1="170" y1="40" x2="210" y2="40" stroke="#0DB152" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="4 4" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-3 7s ease-in-out infinite' }} />
-                          <circle cx="170" cy="40" r="5" fill="#0DB152" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
+                          <path d="M 110 114 Q 110 50, 170 40" stroke="#0FA876" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-3 7s ease-in-out infinite' }} />
+                          <line x1="170" y1="40" x2="210" y2="40" stroke="#0FA876" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="4 4" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-3 7s ease-in-out infinite' }} />
+                          <circle cx="170" cy="40" r="5" fill="#0FA876" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
                         </g>
                       </svg>
                     </div>
@@ -280,9 +260,9 @@ export default function HomePage() {
                         <g style={{ animation: 'float-up 6s ease-in-out infinite' }}>
                           <rect x="85" y="80" width="80" height="60" rx="14" stroke="#ffffff" strokeWidth="2" fill="#1a1a1c" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-3 7s ease-in-out infinite' }} />
                           <path d="M 115 140 L 115 152 L 130 140" stroke="#ffffff" strokeWidth="2" fill="#1a1a1c" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="100" strokeDashoffset="100" pathLength={100} style={{ animation: 'draw-3 7s ease-in-out infinite' }} />
-                          <circle cx="105" cy="110" r="4" fill="#0DB152" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.1s infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
-                          <circle cx="125" cy="110" r="4" fill="#0DB152" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.2s infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
-                          <circle cx="145" cy="110" r="4" fill="#0DB152" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.3s infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
+                          <circle cx="105" cy="110" r="4" fill="#0FA876" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.1s infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
+                          <circle cx="125" cy="110" r="4" fill="#0FA876" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.2s infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
+                          <circle cx="145" cy="110" r="4" fill="#0FA876" style={{ animation: 'pop-in 7s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.3s infinite', transformOrigin: 'center', transformBox: 'fill-box' }} />
                         </g>
                       </svg>
                     </div>

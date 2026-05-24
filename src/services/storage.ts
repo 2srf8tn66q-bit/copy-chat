@@ -2,6 +2,7 @@ import { get, set, del, keys, entries, clear } from 'idb-keyval';
 import type { Character } from '../types/character';
 import type { Message, TimelineEvent } from '../types/timeline';
 import type { IFSession } from '../types/world';
+import type { PersonaPatch } from '../stores/characterStore';
 
 // Key prefixes
 const CHAR_PREFIX = 'char:';
@@ -9,6 +10,8 @@ const CHAT_PREFIX = 'chat:';
 const IF_PREFIX = 'if:';
 const EVENT_PREFIX = 'events:';
 const RAW_PREFIX = 'raw:';
+const BASELINE_PREFIX = 'baseline:';     // 画像首次被修正前的快照
+const FEEDBACK_PREFIX = 'feedback:';     // 每条修正反馈记录
 
 // ==================== Character CRUD ====================
 
@@ -32,6 +35,17 @@ export async function deleteCharacter(id: string): Promise<void> {
   await del(`${CHAT_PREFIX}${id}`);
   await del(`${EVENT_PREFIX}${id}`);
   await del(`${RAW_PREFIX}${id}`);
+  await del(`${BASELINE_PREFIX}${id}`);
+  // Delete all feedback for this character
+  const feedbackKeys = await keys();
+  await Promise.all(
+    feedbackKeys
+      .filter((k) => (k as string).startsWith(FEEDBACK_PREFIX))
+      .map(async (k) => {
+        const fb = await get<PersonaFeedback>(k as string);
+        if (fb?.characterId === id) await del(k);
+      })
+  );
 }
 
 // ==================== Chat History CRUD ====================
@@ -42,6 +56,10 @@ export async function saveChatHistory(characterId: string, messages: Message[]):
 
 export async function getChatHistory(characterId: string): Promise<Message[]> {
   return get<Message[]>(`${CHAT_PREFIX}${characterId}`) ?? [];
+}
+
+export async function clearChatHistory(characterId: string): Promise<void> {
+  await set(`${CHAT_PREFIX}${characterId}`, []);
 }
 
 // ==================== IF Session CRUD ====================
@@ -61,6 +79,63 @@ export async function getAllIFSessions(characterId: string): Promise<IFSession[]
       return (key as string).startsWith(IF_PREFIX) && value.characterId === characterId;
     })
     .map(([, value]) => value);
+}
+
+// ==================== Persona Refinement (baseline + feedback log) ====================
+
+/**
+ * 画像首次被修正之前的"原始快照"。
+ * 一旦保存就永不覆盖（除非用户在 Edit 页里"重置画像"，未来 feature）。
+ */
+export async function saveCharacterBaseline(id: string, character: Character): Promise<void> {
+  await set(`${BASELINE_PREFIX}${id}`, character);
+}
+
+export async function getCharacterBaseline(id: string): Promise<Character | undefined> {
+  return get<Character>(`${BASELINE_PREFIX}${id}`);
+}
+
+/**
+ * 用户在聊天里对某条 AI 回复做的一次修正。
+ * 持久化下来 → 刷新后撤销链仍可用 / 编辑页"修正历史"tab 可查看。
+ */
+export interface PersonaFeedback {
+  id: string;
+  characterId: string;
+  timestamp: string;            // ISO 8601
+  triggerMessage: string;       // 出戏的 AI 回复
+  userCorrection: string;       // 用户填的"哪里不对"
+  userSuggestion?: string;      // 用户填的"应该怎么说"
+  patch: PersonaPatch;          // 实际应用的补丁
+  diffSummary: string[];        // 人话版的变更摘要
+  reasoning: string;            // LLM 给的修改理由
+  reverted?: boolean;           // 是否已被撤销
+}
+
+export async function saveFeedback(feedback: PersonaFeedback): Promise<void> {
+  await set(`${FEEDBACK_PREFIX}${feedback.id}`, feedback);
+}
+
+export async function getFeedback(id: string): Promise<PersonaFeedback | undefined> {
+  return get<PersonaFeedback>(`${FEEDBACK_PREFIX}${id}`);
+}
+
+export async function getAllFeedback(characterId: string): Promise<PersonaFeedback[]> {
+  const allEntries = await entries<string, PersonaFeedback>();
+  return allEntries
+    .filter(([key, value]) => (key as string).startsWith(FEEDBACK_PREFIX) && value.characterId === characterId)
+    .map(([, value]) => value)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));  // 时间正序
+}
+
+export async function updateFeedback(id: string, updates: Partial<PersonaFeedback>): Promise<void> {
+  const existing = await get<PersonaFeedback>(`${FEEDBACK_PREFIX}${id}`);
+  if (!existing) return;
+  await set(`${FEEDBACK_PREFIX}${id}`, { ...existing, ...updates });
+}
+
+export async function deleteFeedback(id: string): Promise<void> {
+  await del(`${FEEDBACK_PREFIX}${id}`);
 }
 
 // ==================== Timeline Events CRUD ====================
@@ -143,6 +218,48 @@ export async function getRawMessagesRange(
     messages: all.slice(start, start + count),
     total: all.length,
   };
+}
+
+// ==================== IF Chat Sessions ====================
+
+const IF_SESSIONS_PREFIX = 'ifsessions:';
+
+export interface IFChatSession {
+  id: string;
+  characterId: string;
+  interventionIdx: number;
+  messages: Message[];
+  startDate: string;
+  createdAt: string;
+  updatedAt: string;
+  contextPreview: string;  // the message content at intervention point
+}
+
+export async function getAllIFChatSessions(characterId: string): Promise<IFChatSession[]> {
+  const sessions = await get<IFChatSession[]>(`${IF_SESSIONS_PREFIX}${characterId}`);
+  return (sessions ?? []).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export async function getIFChatSession(characterId: string, sessionId: string): Promise<IFChatSession | undefined> {
+  const sessions = await getAllIFChatSessions(characterId);
+  return sessions.find(s => s.id === sessionId);
+}
+
+export async function saveIFChatSession(session: IFChatSession): Promise<void> {
+  const sessions = await get<IFChatSession[]>(`${IF_SESSIONS_PREFIX}${session.characterId}`) ?? [];
+  const idx = sessions.findIndex(s => s.id === session.id);
+  if (idx >= 0) {
+    sessions[idx] = session;
+  } else {
+    sessions.push(session);
+  }
+  await set(`${IF_SESSIONS_PREFIX}${session.characterId}`, sessions);
+}
+
+export async function deleteIFChatSession(characterId: string, sessionId: string): Promise<void> {
+  const sessions = await get<IFChatSession[]>(`${IF_SESSIONS_PREFIX}${characterId}`) ?? [];
+  const filtered = sessions.filter(s => s.id !== sessionId);
+  await set(`${IF_SESSIONS_PREFIX}${characterId}`, filtered);
 }
 
 // ==================== Utility ====================

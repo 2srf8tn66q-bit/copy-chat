@@ -90,7 +90,7 @@ export function TimelineMockup() {
         <p className="text-[10px] text-black/20 text-center mb-3">─── 3月15日 ───</p>
         <Bubble side="left" text="你怎么又不回我消息" />
         <Bubble side="right" text="我在开会啊 真没看到" />
-        <p className="text-[10px] text-[#0DB152]/60 text-center my-1">↑ 这一次你说了不同的话</p>
+        <p className="text-[10px] text-[#0FA876]/60 text-center my-1">↑ 这一次你说了不同的话</p>
         <Bubble side="right" text="对不起 我以后不会了 你别生气" />
         <Bubble side="left" text="哼 你每次都这么说" />
         <Bubble side="right" text="这次是真的 我给你点了你最爱喝的奶茶" />

@@ -1,10 +1,13 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Eye, EyeOff, Zap, Trash2, Server, X, CheckCircle, Loader2, Settings as SettingsIcon } from 'lucide-react';
+import { useState, useRef, useCallback } from 'react';
+import { Plus, Eye, EyeOff, Zap, Trash2, X, CheckCircle, Loader2, Settings as SettingsIcon, Upload, User } from 'lucide-react';
 import { useLLMStore } from '../stores/llmStore';
+import { useUserProfileStore } from '../stores/userProfileStore';
 import { testConnection } from '../services/llmService';
+import { fileToCompressedDataUrl } from '../utils/image';
 import type { LLMConfig, LLMProvider } from '../types/llm';
 import NavBar from '../components/layout/NavBar';
+import PageHeader from '../components/PageHeader';
+import FadeImage from '../components/FadeImage';
 import openaiLogo from '../assets/providers/openai.png';
 import kimiLogo from '../assets/providers/kimi.png';
 import zhipuLogo from '../assets/providers/zhipu.png';
@@ -23,15 +26,17 @@ const PROVIDER_ICONS: Record<string, string> = {
   ollama: ollamaLogo,
 };
 
+// 默认 base URL + model ID。各家更新很快，这里用相对稳的"已发布过的合理 ID"作为默认值。
+// 用户可以在配置表单里改成最新的，不影响接口接通。
 const PROVIDER_META: Record<string, { baseUrl: string; model: string; label: string; color: string }> = {
-  openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.4', label: 'OpenAI', color: '#10a37f' },
-  kimi: { baseUrl: 'https://api.moonshot.cn/v1', model: 'k2.5', label: 'Kimi', color: '#6366f1' },
-  zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', label: '智谱', color: '#3b82f6' },
-  claude: { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-opus-4-7', label: 'Claude', color: '#d97706' },
-  aliyun: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-max', label: '阿里云', color: '#f97316' },
+  openai:  { baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.5', label: 'OpenAI', color: '#10a37f' },
+  kimi:    { baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2.6', label: 'Kimi', color: '#6366f1' },
+  zhipu:   { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', label: '智谱', color: '#3b82f6' },
+  claude:  { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-6', label: 'Claude', color: '#d97706' },
+  aliyun:  { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max-latest', label: '阿里云', color: '#f97316' },
   minimax: { baseUrl: 'https://api.minimax.io/v1', model: 'MiniMax-M2.7', label: 'MiniMax', color: '#6366f1' },
-  ollama: { baseUrl: 'http://localhost:11434/v1', model: 'llama4', label: 'Ollama', color: '#64748b' },
-  custom: { baseUrl: '', model: '', label: '自定义', color: '#6d7b6d' },
+  ollama:  { baseUrl: 'http://localhost:11434/v1', model: 'llama4:scout', label: 'Ollama', color: '#64748b' },
+  custom:  { baseUrl: '', model: '', label: '自定义', color: '#6d7b6d' },
 };
 
 const PROVIDER_OPTIONS: LLMProvider[] = ['openai', 'kimi', 'zhipu', 'claude', 'aliyun', 'minimax', 'ollama', 'custom'];
@@ -53,13 +58,45 @@ function createInitialFormData(): FormData {
 }
 
 export default function SettingsPage() {
-  const navigate = useNavigate();
   const { configs, activeConfigIndex, addConfig, removeConfig, setActiveConfig } = useLLMStore();
+  const userAvatar = useUserProfileStore((s) => s.avatar);
+  const userNickname = useUserProfileStore((s) => s.nickname);
+  const setUserAvatar = useUserProfileStore((s) => s.setAvatar);
+  const setUserNickname = useUserProfileStore((s) => s.setNickname);
+  const clearUserAvatar = useUserProfileStore((s) => s.clearAvatar);
+
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState<FormData>(createInitialFormData());
   const [showApiKey, setShowApiKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // 用户头像上传
+  const avatarFileRef = useRef<HTMLInputElement>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+
+  const handleAvatarFile = useCallback(async (file: File) => {
+    setAvatarError(null);
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('请选择图片文件');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setAvatarError('图片不能超过 10MB');
+      return;
+    }
+    setUploadingAvatar(true);
+    try {
+      const compressed = await fileToCompressedDataUrl(file, 256);
+      setUserAvatar(compressed);
+    } catch (err) {
+      console.error(err);
+      setAvatarError('图片处理失败');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }, [setUserAvatar]);
 
   const handleProviderChange = (provider: LLMProvider) => {
     const meta = PROVIDER_META[provider];
@@ -107,29 +144,144 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="bg-surface text-on-surface min-h-screen flex flex-col">
-      {/* Nav */}
+    <div className="text-on-surface min-h-screen flex flex-col relative">
       <NavBar variant="solid" />
 
-      <main className="pt-28 pb-20 px-6 max-w-2xl mx-auto flex-1">
-        {/* Header */}
-        <div className="mb-10">
-          <h1 className="text-3xl font-extrabold tracking-tight mb-2">设置</h1>
-          <p className="text-on-surface-variant text-sm">配置用于生成画像和对话的大模型接口</p>
-        </div>
+      <main className="relative z-10 pt-32 pb-24 px-8 md:px-16 lg:px-24 max-w-[1100px] mx-auto flex-1 w-full">
+        <PageHeader
+          eyebrow="SETTINGS · 配置"
+          title="设置"
+          subtitle="管理你的资料和大模型接口。"
+          action={
+            configs.length > 0 && !showForm && (
+              <button onClick={() => setShowForm(true)} className="btn-primary inline-flex items-center gap-1.5">
+                <Plus size={14} />
+                添加
+              </button>
+            )
+          }
+        />
 
-        {/* Config List */}
-        {configs.length === 0 && !showForm && (
-          <div className="text-center py-20">
-            <div className="w-16 h-16 rounded-2xl bg-surface-container-high mx-auto mb-5 flex items-center justify-center">
-              <Server size={28} className="text-outline" />
+        {/* ─── 你的资料 ────────────────────────────────────── */}
+        <section className="mb-10 anim-fade-up">
+          <p className="eyebrow mb-3 text-white/40">PROFILE · 你的资料</p>
+          <div className="card-glass p-6">
+            <div className="flex items-start gap-5">
+              {/* Avatar preview */}
+              <div
+                className="w-20 h-20 rounded-2xl overflow-hidden flex items-center justify-center shrink-0"
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                }}
+              >
+                {userAvatar ? (
+                  <FadeImage src={userAvatar} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <User size={28} className="text-white/30" />
+                )}
+              </div>
+
+              {/* Controls */}
+              <div className="flex-1 min-w-0 space-y-3">
+                <div>
+                  <label className="block text-[11px] uppercase tracking-wider text-white/40 mb-1.5">
+                    你的头像
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => avatarFileRef.current?.click()}
+                      disabled={uploadingAvatar}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                      style={{
+                        backgroundColor: 'rgba(15, 168, 118, 0.12)',
+                        color: 'var(--color-primary)',
+                        border: '1px solid rgba(15, 168, 118, 0.3)',
+                      }}
+                    >
+                      <Upload size={14} />
+                      {uploadingAvatar ? '处理中…' : userAvatar ? '更换' : '上传头像'}
+                    </button>
+                    {userAvatar && (
+                      <button
+                        type="button"
+                        onClick={clearUserAvatar}
+                        className="px-3 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 hover:bg-white/[0.05] transition-colors"
+                      >
+                        清除
+                      </button>
+                    )}
+                  </div>
+                  {avatarError && (
+                    <p className="text-xs mt-1.5" style={{ color: 'var(--color-error)' }}>{avatarError}</p>
+                  )}
+                  <p className="text-[11px] mt-1.5 text-white/35">
+                    会出现在聊天里你这一侧 · 自动压缩到 256×256 · 仅存本地
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] uppercase tracking-wider text-white/40 mb-1.5">
+                    昵称 (可选)
+                  </label>
+                  <input
+                    type="text"
+                    value={userNickname}
+                    onChange={(e) => setUserNickname(e.target.value)}
+                    placeholder='留空就用"我"'
+                    maxLength={20}
+                    className="w-full max-w-xs px-3 py-2 rounded-lg text-sm bg-white/[0.04] border border-white/[0.08] text-white outline-none focus:border-white/20 transition-colors"
+                  />
+                </div>
+
+                <input
+                  ref={avatarFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleAvatarFile(file);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
             </div>
-            <p className="font-semibold text-on-surface mb-1">还没有配置</p>
-            <p className="text-sm text-outline mb-6">添加一个 LLM 接口配置来开始使用</p>
-            <button
-              onClick={() => setShowForm(true)}
-              className="inline-flex items-center gap-2 bg-primary text-on-primary px-6 py-3 rounded-lg text-sm font-semibold active:scale-95 transition-transform"
-            >
+          </div>
+        </section>
+
+        {/* ─── API 接口 ──────────────────────────────────── */}
+        <p className="eyebrow mb-3 text-white/40">API · 接口</p>
+
+        {/* Empty state */}
+        {configs.length === 0 && !showForm && (
+          <div className="mt-10 card-glass p-12 text-center anim-fade-up-lg">
+            {/* 浮动的 provider logo 暗示——这里需要"接一个 AI" */}
+            <div className="flex items-center justify-center gap-3 mb-6 opacity-60">
+              {(['openai', 'kimi', 'claude', 'zhipu'] as const).map((p, i) => (
+                <div
+                  key={p}
+                  className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden"
+                  style={{
+                    backgroundColor: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    animation: `float${(i % 3) + 1} ${5 + i * 0.4}s ease-in-out infinite`,
+                  }}
+                >
+                  <img src={PROVIDER_ICONS[p]} alt="" className="w-7 h-7" />
+                </div>
+              ))}
+            </div>
+            <p className="eyebrow mb-3 text-white/40">NO CONNECTION</p>
+            <p className="text-[28px] text-white/95 mb-3" style={{ fontFamily: 'var(--font-serif)', letterSpacing: '-0.01em' }}>
+              先接一个大模型
+            </p>
+            <p className="text-sm text-white/55 mb-8 max-w-md mx-auto leading-relaxed">
+              COPY CHAT 用大模型分析聊天记录、还原 TA 的说话方式。<br />
+              OpenAI / Claude / Kimi / 智谱…… 选一个接入。
+            </p>
+            <button onClick={() => setShowForm(true)} className="btn-primary inline-flex items-center gap-2">
               <Plus size={16} />
               添加配置
             </button>
@@ -255,12 +407,6 @@ export default function SettingsPage() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="w-full py-8 border-t border-outline-variant bg-surface">
-        <div className="max-w-7xl mx-auto flex justify-between items-center px-8">
-          <span className="text-xs text-outline">&copy; 2026 Copy Chat</span>
-        </div>
-      </footer>
     </div>
   );
 }

@@ -1,74 +1,334 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════
+   Design Tokens  (Phase A — 设计语言重建)
+   参照 Linear / Vercel / Stripe 的 token 系统
+   ═══════════════════════════════════════════════════════════ */
 @theme {
-  --color-surface: #1a1a1c;
-  --color-surface-container: #222225;
-  --color-surface-container-low: #1e1e20;
-  --color-surface-container-lowest: #252528;
-  --color-surface-container-high: #2c2c30;
-  --color-surface-container-highest: #353538;
-  --color-on-surface: #f0f0f0;
-  --color-on-surface-variant: #8a8a8a;
-  --color-primary: #0DB152;
-  --color-primary-container: #3DD97A;
+  /* ─── Surfaces (layered grayscale via opacity, not pure gray) ─── */
+  --color-surface: #0a0a0b;                /* page bg */
+  --color-surface-container-lowest: rgba(255, 255, 255, 0.02);
+  --color-surface-container-low: rgba(255, 255, 255, 0.03);
+  --color-surface-container: rgba(255, 255, 255, 0.04);
+  --color-surface-container-high: rgba(255, 255, 255, 0.06);
+  --color-surface-container-highest: rgba(255, 255, 255, 0.08);
+
+  /* ─── Text (transparent white for layered hierarchy) ─── */
+  --color-on-surface: rgba(255, 255, 255, 0.92);
+  --color-on-surface-variant: rgba(255, 255, 255, 0.55);
+  --color-on-surface-muted: rgba(255, 255, 255, 0.35);
+  --color-on-surface-faint: rgba(255, 255, 255, 0.20);
+
+  /* ─── Borders (subtle, layered) ─── */
+  --color-outline: rgba(255, 255, 255, 0.10);
+  --color-outline-variant: rgba(255, 255, 255, 0.06);
+  --color-outline-strong: rgba(255, 255, 255, 0.18);
+
+  /* ─── Brand (single accent, restrained) ─── */
+  --color-primary: #0FA876;          /* Jade green — sophisticated, less raw */
+  --color-primary-hover: #14BC85;
+  --color-primary-container: #143329;
   --color-on-primary: #ffffff;
-  --color-on-primary-fixed: #ffffff;
-  --color-primary-fixed: #86EDAE;
+
+  /* ─── Semantic ─── */
   --color-secondary: #7b93c0;
-  --color-secondary-container: #1e2d4a;
-  --color-on-secondary: #ffffff;
-  --color-on-secondary-container: #bacffe;
   --color-tertiary: #f76780;
-  --color-tertiary-container: #4a1926;
-  --color-on-tertiary: #ffffff;
-  --color-outline: #333333;
-  --color-outline-variant: #222222;
   --color-error: #ff5449;
+
+  /* ─── Chat (WeChat-inspired, unchanged) ─── */
   --color-wechat-green: #95ec69;
   --color-wechat-bg: #1a1a1a;
   --color-wechat-header: #1a1a1a;
   --color-wechat-input-bg: #111111;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   Type System  (modular scale 1.25 — Major Third)
+   ═══════════════════════════════════════════════════════════ */
+:root {
+  /* Font families */
+  --font-serif: 'Noto Serif SC', 'Songti SC', 'STSong', serif;
+  --font-sans: 'DM Sans', 'Noto Sans SC', -apple-system, BlinkMacSystemFont,
+               'PingFang SC', 'Hiragino Sans GB', sans-serif;
+
+  /* Type scale */
+  --text-display: clamp(56px, 8vw, 96px);  /* Hero only */
+  --text-h1: clamp(40px, 5vw, 56px);       /* 内页主标题 */
+  --text-h2: 32px;
+  --text-h3: 24px;
+  --text-lg: 18px;
+  --text-base: 15px;
+  --text-sm: 13px;
+  --text-xs: 11px;
+
+  /* Spacing system (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --space-32: 128px;
+
+  /* Easing curves (no ease-in-out!) */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-expo: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out-smooth: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Animation durations */
+  --dur-fast: 150ms;
+  --dur-base: 250ms;
+  --dur-slow: 400ms;
+  --dur-slower: 600ms;
+
+  /* Brand accent (RGB for shadow alpha) */
+  --accent-rgb: 15, 168, 118;       /* #0FA876 in rgb for box-shadow rings */
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Base
+   ═══════════════════════════════════════════════════════════ */
 @layer base {
   h1, h2, h3 {
-    font-family: 'Noto Serif SC', 'Songti SC', serif;
+    font-family: var(--font-serif);
+    letter-spacing: -0.02em;
+  }
+
+  /* 永久预留滚动条空间 — 避免路由切换时滚动条出现/消失导致的横向回流 */
+  html {
+    scrollbar-gutter: stable;
   }
 
   body {
-    font-family: 'DM Sans', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    font-family: var(--font-sans);
     background-color: var(--color-surface);
     color: var(--color-on-surface);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Tabular numbers everywhere */
+    font-feature-settings: "tnum" 1, "ss01" 1;
   }
 
   #root {
     min-height: 100vh;
   }
-}
 
-@keyframes typing-bounce {
-  0%, 80%, 100% {
-    transform: scale(0.6);
-    opacity: 0.4;
+  /* ─── Selection ─── */
+  ::selection {
+    background-color: rgba(var(--accent-rgb), 0.3);
+    color: #fff;
   }
-  40% {
-    transform: scale(1);
+
+  /* ─── Scrollbar ─── */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    transition: background 200ms;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  /* ─── Focus ring (Linear / Stripe style — outer accent glow) ─── */
+  *:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--color-surface),
+      0 0 0 4px rgba(var(--accent-rgb), 0.45);
+    transition: box-shadow 150ms var(--ease-out-expo);
+  }
+
+  /* Form inputs / textareas: smooth border transition + subtle focus glow */
+  input, textarea, select {
+    transition:
+      border-color 180ms var(--ease-out-expo),
+      box-shadow 180ms var(--ease-out-expo),
+      background-color 180ms var(--ease-out-expo);
+  }
+  input:focus, textarea:focus, select:focus {
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+  }
+  /* Reset for chat input which has its own theming */
+  .chat-input-field:focus {
+    box-shadow: none;
+  }
+
+  /* ─── Reduced motion ─── */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* ─── Chat textarea placeholder (themable via inline custom prop) ─── */
+  .chat-input-field::placeholder {
+    color: var(--chat-placeholder, #999);
     opacity: 1;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Utility classes  (复用模板)
+   ═══════════════════════════════════════════════════════════ */
+
+/* Eyebrow — uppercase tracking-wide label above big titles */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-muted);
+}
+
+/* Display title (Hero only) */
+.text-display {
+  font-family: var(--font-serif);
+  font-size: var(--text-display);
+  font-weight: 700;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+}
+
+/* H1 (内页主标题) */
+.text-h1 {
+  font-family: var(--font-serif);
+  font-size: var(--text-h1);
+  font-weight: 600;
+  line-height: 1.0;
+  letter-spacing: -0.03em;
+}
+
+/* Glass card — Linear / Vercel style */
+.card-glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  transition: background-color var(--dur-slow) var(--ease-out-expo),
+              border-color var(--dur-slow) var(--ease-out-expo),
+              transform var(--dur-slow) var(--ease-out-expo),
+              box-shadow var(--dur-slow) var(--ease-out-expo);
+}
+/* Hover only on real cursors (not touch) */
+@media (hover: hover) {
+  .card-glass:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.16);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  }
+}
+/* Press feedback (universal: cursor + touch) */
+.card-glass:active {
+  transform: translateY(0) scale(0.995);
+  transition-duration: 100ms;
+}
+/* Clickable card variant (links/buttons) — adds cursor pointer */
+.card-glass[role="button"], a.card-glass, button.card-glass {
+  cursor: pointer;
+}
+
+/* Button — primary CTA */
+.btn-primary {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-weight: 500;
+  font-size: var(--text-sm);
+  transition: all var(--dur-base) var(--ease-out-expo);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.15);
+}
+@media (hover: hover) {
+  .btn-primary:hover {
+    background: var(--color-primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.30);
+  }
+}
+.btn-primary:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 100ms;
+  box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.15);
+}
+
+/* Subtle text-link (with arrow) */
+.text-link {
+  color: var(--color-on-surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  transition: gap var(--dur-base) var(--ease-out-expo);
+}
+.text-link:hover {
+  gap: 12px;
+}
+.text-link:hover .text-link-arrow {
+  transform: translateX(2px);
+}
+.text-link-arrow {
+  transition: transform var(--dur-base) var(--ease-out-expo);
+}
+
+/* Universal press feedback — apply to any clickable element */
+.press {
+  transition: transform 200ms var(--ease-out-expo);
+}
+.press:active {
+  transform: scale(0.97);
+  transition-duration: 100ms;
+}
+
+/* Skeleton shimmer (Linear style) */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.02) 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Legacy keyframes (used by Home Hero & chat — preserve)
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes typing-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
 }
 
 @keyframes float1 {
   0%, 100% { transform: translateY(0px) rotate(0deg); }
   50% { transform: translateY(-8px) rotate(-2deg); }
 }
-
 @keyframes float2 {
   0%, 100% { transform: translateY(0px) rotate(0deg); }
   50% { transform: translateY(-6px) rotate(2deg); }
 }
-
 @keyframes float3 {
   0%, 100% { transform: translateY(0px) scale(1); }
   50% { transform: translateY(-4px) scale(1.15); }
@@ -88,22 +348,18 @@
   0%, 100% { transform: translateY(0px); }
   50% { transform: translateY(-8px); }
 }
-
 @keyframes float-chat-left {
   0%, 100% { transform: translateY(0px) translateX(0px); }
   50% { transform: translateY(-6px) translateX(-2px); }
 }
-
 @keyframes float-chat-right {
   0%, 100% { transform: translateY(0px) translateX(0px); }
   50% { transform: translateY(-10px) translateX(3px); }
 }
-
 @keyframes pulse-halo {
   0%, 100% { transform: scale(1); opacity: 0.8; }
   50% { transform: scale(1.03); opacity: 0.5; }
 }
-
 @keyframes spin-star {
   0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.7; }
   50% { transform: scale(1.2) rotate(15deg); opacity: 1; }
@@ -115,38 +371,56 @@
   20%, 85% { stroke-dashoffset: 0; opacity: 1; }
   95%, 100%{ stroke-dashoffset: 100; opacity: 0; }
 }
-
 @keyframes draw-2 {
   0%, 15%  { stroke-dashoffset: 100; opacity: 0; }
   20%      { opacity: 1; }
   30%, 85% { stroke-dashoffset: 0; opacity: 1; }
   95%, 100%{ stroke-dashoffset: 100; opacity: 0; }
 }
-
 @keyframes draw-3 {
   0%, 25%  { stroke-dashoffset: 100; opacity: 0; }
   30%      { opacity: 1; }
   40%, 85% { stroke-dashoffset: 0; opacity: 1; }
   95%, 100%{ stroke-dashoffset: 100; opacity: 0; }
 }
-
 @keyframes pop-in {
   0%, 35%  { transform: scale(0); opacity: 0; }
   45%, 85% { transform: scale(1); opacity: 1; }
   95%, 100%{ transform: scale(0); opacity: 0; }
 }
-
 @keyframes float-up {
   0%, 100% { transform: translateY(0px); }
   50%      { transform: translateY(-8px); }
 }
-
 @keyframes float-down {
   0%, 100% { transform: translateY(0px); }
   50%      { transform: translateY(6px); }
 }
-
 @keyframes btn-glow {
-  0%, 100% { box-shadow: 0 8px 20px rgba(13, 177, 82, 0.15); }
-  50% { box-shadow: 0 8px 32px rgba(13, 177, 82, 0.4); }
+  0%, 100% { box-shadow: 0 8px 20px rgba(15, 168, 118, 0.15); }
+  50% { box-shadow: 0 8px 32px rgba(15, 168, 118, 0.4); }
 }
+
+/* ─── Page enter animations (PageHeader uses these) ─── */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-up-lg {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.anim-fade-in    { animation: fade-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.anim-fade-up    { animation: fade-up 600ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.anim-fade-up-lg { animation: fade-up-lg 800ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.delay-100 { animation-delay: 100ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-500 { animation-delay: 500ms; }
+.delay-700 { animation-delay: 700ms; }
+.delay-900 { animation-delay: 900ms; }

@@ -41,6 +41,15 @@ function lengthDesc(len: Character['persona']['responseLength']): string {
   }
 }
 
+/** Gender pronoun helper */
+function genderDesc(gender: Character['gender']): string {
+  switch (gender) {
+    case 'male':   return '男性';
+    case 'female': return '女性';
+    default:       return '';
+  }
+}
+
 /** Join an array with Chinese comma, or fallback */
 function joinQuotes(arr: string[] | undefined, fallback: string): string {
   if (!arr || arr.length === 0) return fallback;
@@ -56,16 +65,22 @@ export function buildSystemPrompt(context: ChatContext): string {
 
   const lines: string[] = [];
 
-  // ── Core identity ──
-  lines.push(`你是${identity.name}。你正在和你的聊天对象（我）微信聊天。`);
+  // ── Core identity (with gender & relationship) ──
+  const genderPart = genderDesc(character.gender);
+  const relationPart = character.relationshipToUser || '';
+  let identityLine = `你是${identity.name}`;
+  if (genderPart) identityLine += `，${genderPart}`;
+  if (relationPart) identityLine += `，是我的${relationPart}`;
+  identityLine += '。你正在和我微信聊天。';
+  lines.push(identityLine);
   lines.push('');
 
   // ── Real conversation examples (few-shot) ──
   if (sampleConversations && sampleConversations.length > 0) {
-    lines.push('以下是你们过去的真实聊天记录片段，请严格按照这个风格回复：');
+    lines.push('以下是你们过去的真实聊天记录片段。注意：这些仅供你参考说话风格和语气，不代表现在的状态或话题。不要主动提起这些对话中的具体事件。');
     lines.push('');
     sampleConversations.forEach((snippet, i) => {
-      lines.push(`【对话${i + 1}】`);
+      lines.push(`【风格参考${i + 1}】`);
       lines.push(snippet);
       lines.push('');
     });
@@ -103,7 +118,16 @@ export function buildSystemPrompt(context: ChatContext): string {
   if (habits.frequentEmojis.length > 0) {
     lines.push(`常用 emoji：${habits.frequentEmojis.join(' ')}`);
   }
+  if (habits.catchphrases && habits.catchphrases.length > 0) {
+    lines.push(`口癖/高频表达：${habits.catchphrases.join('、')}（自然融入，不要刻意堆砌）`);
+  }
   lines.push('');
+
+  // ── neverSay: negative constraints ──
+  if (persona.neverSay && persona.neverSay.length > 0) {
+    lines.push(`你绝对不会这样说话：${persona.neverSay.join('、')}。避免这些表达方式。`);
+    lines.push('');
+  }
 
   // ── Shared memories ──
   const memoryItems: string[] = [];
@@ -120,8 +144,15 @@ export function buildSystemPrompt(context: ChatContext): string {
     memoryItems.push(`你们容易起冲突的模式：${memories.conflictPatterns.join('、')}`);
   }
   if (memoryItems.length > 0) {
-    lines.push('你们之间的共同记忆：');
+    lines.push('你们之间的共同记忆（这些是过去发生的事，仅作为背景知识，不要当成现在正在发生的事）：');
     memoryItems.forEach((m) => lines.push(`- ${m}`));
+    lines.push('');
+  }
+
+  // ── Private chat: temporal anchor ──
+  if (mode === 'private') {
+    const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+    lines.push(`现在是${today}。你们正在进行一段新的日常聊天，话题完全由当前对话决定。不要主动提起过去聊天记录中的具体事件，除非对方先提到。`);
     lines.push('');
   }
 
@@ -134,12 +165,25 @@ export function buildSystemPrompt(context: ChatContext): string {
     lines.push('');
   }
 
+  // ── Message style: burst mode ──
+  if (character.messageStyle === 'burst') {
+    lines.push('【连发模式】这是你强制遵守的输出格式要求：');
+    lines.push('- 每次回复都必须拆成 2-4 条短消息');
+    lines.push('- 多条消息之间用 ||| 分隔（注意是三个英文竖线，没有空格）');
+    lines.push('- 不允许只回一条长消息，每条短消息不超过 15 个字');
+    lines.push('- 示例：嗯嗯|||我知道了|||你放心吧');
+    lines.push('- 示例：你说啥|||我没听懂|||再说一遍');
+    lines.push('- 这条规则永远生效，每一轮回复都要遵守。');
+    lines.push('');
+  }
+
   // ── Hard rules ──
   lines.push('重要规则：');
-  lines.push('- 你不是 AI 助手，你是这个真实的人。用 TA 的语气说话。');
-  lines.push('- 不要说"作为AI""我不能"之类的话。');
-  lines.push('- 直接回复，不要加任何前缀或标签。');
-  lines.push('- 像发微信一样，不要像写作文。短句为主，可以没有标点，可以有错别字。');
+  lines.push('- 你是一个真实的人，不是 AI。用你自己的语气说话，保持你的性格。');
+  lines.push('- 绝对不要出现"作为AI""我是语言模型""我不能""我没有感情"这类表述。');
+  lines.push('- 直接回复，不要加任何前缀、标签、角色名。');
+  lines.push('- 像发微信一样自然。短句为主，可以没有标点。');
+  lines.push('- 尽量少用书面化的词汇（如"确实""因此""不过""当然"），用口语替代。如果你的语录参考里有书面词，那就按你的习惯来。');
   // 用精确字数代替模糊描述
   const avgLen = habits.avgMessageLength;
   if (avgLen && avgLen > 0) {
@@ -156,6 +200,24 @@ export function buildSystemPrompt(context: ChatContext): string {
 /** Max history messages to include (to stay within token limits) */
 const MAX_HISTORY = 20;
 
+/**
+ * Burst 模式下，合并相邻的 assistant 消息为单条用 ||| 分隔的消息。
+ * 这样 LLM 在历史里看到的是自己的 burst 输出格式（`a|||b|||c`），
+ * 而不是三条独立的 assistant 消息——后者会让 LLM 忘记 burst 指令。
+ */
+function mergeBurstAssistantMessages(history: ChatMessage[]): ChatMessage[] {
+  const merged: ChatMessage[] = [];
+  for (const msg of history) {
+    const last = merged[merged.length - 1];
+    if (msg.role === 'assistant' && last?.role === 'assistant') {
+      last.content = `${last.content}|||${msg.content}`;
+    } else {
+      merged.push({ ...msg });
+    }
+  }
+  return merged;
+}
+
 export function buildMessages(context: ChatContext, userMessage: string): ChatMessage[] {
   const result: ChatMessage[] = [];
 
@@ -165,11 +227,13 @@ export function buildMessages(context: ChatContext, userMessage: string): ChatMe
     content: buildSystemPrompt(context),
   });
 
-  // 2. Chat history (last N messages)
-  const history = context.chatHistory.slice(-MAX_HISTORY);
+  // 2. Chat history (last N messages, burst 模式下合并相邻 assistant)
+  let history = context.chatHistory.slice(-MAX_HISTORY);
+  if (context.character.messageStyle === 'burst') {
+    history = mergeBurstAssistantMessages(history);
+  }
   result.push(...history);
 
-  // 3. IF mode: inject pending event as a director instruction (not shown to user)
   // 3. Latest user message
   result.push({
     role: 'user',

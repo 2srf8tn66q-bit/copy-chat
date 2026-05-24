@@ -1,5 +1,9 @@
 export interface Character {
   id: string;
+  // Layer 0: 基础
+  gender: 'male' | 'female' | 'unknown';
+  relationshipToUser: string;  // "恋人" / "闺蜜" / "大学室友" / "同事" 等
+  messageStyle: 'single' | 'burst';  // single=一条说完, burst=连发多条短消息
   // Layer 1: 身份
   identity: {
     name: string;
@@ -15,6 +19,7 @@ export interface Character {
     emotionalLogic: string;
     typicalPhrases: string[];
     responseLength: 'short' | 'medium' | 'long';
+    neverSay: string[];  // 这个人绝对不会说的话/表达方式
   };
   // Layer 3: 记忆
   memories: {
