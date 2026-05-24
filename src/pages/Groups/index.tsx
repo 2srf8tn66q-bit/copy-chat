@@ -119,7 +119,7 @@ function EmptyGroupsState({
     >
       {/* Background image (full bleed) */}
       <img
-        src="/empty-groups.png"
+        src="/empty-groups.jpg"
         alt=""
         className="absolute inset-0 w-full h-full object-cover"
         style={{ objectPosition: 'center' }}

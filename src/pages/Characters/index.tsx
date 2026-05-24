@@ -105,7 +105,7 @@ function EmptyCharactersState({ onImport }: { onImport: () => void }) {
     >
       {/* Background image (full bleed) */}
       <img
-        src="/empty-characters.png"
+        src="/empty-characters.jpg"
         alt=""
         className="absolute inset-0 w-full h-full object-cover"
         style={{ objectPosition: 'center' }}
