@@ -21,6 +21,9 @@ import { sendChatMessage } from './llmService';
 export interface GenerationResult {
   character: Omit<Character, 'id' | 'createdAt' | 'sourceType'>;
   events: Omit<TimelineEvent, 'id' | 'status'>[];
+  /** 提取失败（重试用尽后仍失败）的季度标签，例如 ["2025-Q3", "2026-Q1"]。
+   *  UI 可用此提示用户重新生成。 */
+  failedSegments: string[];
 }
 
 export type ProgressCallback = (msg: string) => void;
@@ -528,22 +531,59 @@ ${messageText}
   ];
 }
 
+interface SegmentExtractResult {
+  /** 季度结果（成功提取的内容，失败时为空 result） */
+  result: SegmentResult;
+  /** 季度标签（如 "2025-Q3"），用于 UI 汇总失败项 */
+  label: string;
+  /** 该季度是否提取成功（重试用尽后仍失败 = false） */
+  ok: boolean;
+}
+
+/**
+ * 单个季度的提取：内置 2 次重试，指数退避。
+ * 失败时打 console.error 暴露真因（429/JSON 解析错/超时等），
+ * 不再静默返回空数据，让调用方能汇总失败 segment 提示用户。
+ */
 async function extractSegment(
   segment: QuarterSegment,
   participants: { self: string; other: string },
   llmConfig: LLMConfig,
-): Promise<SegmentResult> {
+): Promise<SegmentExtractResult> {
   const empty: SegmentResult = {
     places: [], jokes: [], conflicts: [],
     relationshipMilestones: [], events: [],
   };
-  try {
-    const prompt = buildSegmentPrompt(segment, participants);
-    const response = await sendChatMessage(llmConfig, prompt);
-    return safeParseJSON<SegmentResult>(response, empty);
-  } catch {
-    return empty;
+  const RETRY_DELAYS_MS = [500, 1500];  // 重试 2 次：0.5s, 1.5s
+  const prompt = buildSegmentPrompt(segment, participants);
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const response = await sendChatMessage(llmConfig, prompt);
+      const parsed = safeParseJSON<SegmentResult | null>(response, null);
+      if (!parsed) {
+        // JSON 解析失败 —— 算作可重试错误
+        throw new Error('LLM 返回非合法 JSON');
+      }
+      return { result: parsed, label: segment.label, ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (attempt < RETRY_DELAYS_MS.length) {
+        console.warn(
+          `[profileGenerator] segment ${segment.label} attempt ${attempt + 1} 失败，` +
+          `${RETRY_DELAYS_MS[attempt]}ms 后重试: ${msg}`,
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      } else {
+        console.error(
+          `[profileGenerator] segment ${segment.label} 重试用尽，放弃。原始错误: ${msg}`,
+        );
+        return { result: empty, label: segment.label, ok: false };
+      }
+    }
   }
+  // unreachable, TS 类型缝合
+  return { result: empty, label: segment.label, ok: false };
 }
 
 async function runInBatches<T>(
@@ -597,7 +637,7 @@ export async function generateFromParsedData(
   llmConfig: LLMConfig,
   onProgress?: ProgressCallback,
 ): Promise<GenerationResult> {
-  const defaultResult: GenerationResult = { character: defaultCharacter(), events: [] };
+  const defaultResult: GenerationResult = { character: defaultCharacter(), events: [], failedSegments: [] };
   defaultResult.character.identity.name = parseResult.participants.other;
 
   if (parseResult.messages.length === 0) return defaultResult;
@@ -609,7 +649,7 @@ export async function generateFromParsedData(
   const candidateQuotes = collectCandidateQuotes(parseResult.messages);
   const fallbackQuotes = categorizeQuotesFallback(parseResult.messages);
 
-  let character = defaultResult.character;
+  const character = defaultResult.character;
 
   // ─── 第一步：LLM 生成画像 ────
   onProgress?.('正在生成性格画像...');
@@ -708,24 +748,29 @@ export async function generateFromParsedData(
   const allJokes: string[] = [];
   const allConflicts: string[] = [];
   const allMilestones: string[] = [];
-  let allEvents: Omit<TimelineEvent, 'id' | 'status'>[] = [];
+  const allEvents: Omit<TimelineEvent, 'id' | 'status'>[] = [];
+  const failedSegments: string[] = [];
 
   if (segments.length > 0) {
     onProgress?.(`正在提取记忆 (0/${totalSegments})...`);
 
     const tasks = segments.map(segment => () =>
       extractSegment(segment, parseResult.participants, llmConfig)
-        .then(result => {
+        .then(extractResult => {
           completedSegments++;
           onProgress?.(`正在提取记忆 (${completedSegments}/${totalSegments})...`);
-          return result;
+          return extractResult;
         })
     );
 
     const segmentResults = await runInBatches(tasks, batchSize);
     const validTypes = ['conflict', 'confession', 'plan', 'turning_point', 'separation', 'reunion', 'daily_share'];
 
-    for (const result of segmentResults) {
+    for (const { result, label, ok } of segmentResults) {
+      if (!ok) {
+        failedSegments.push(label);
+        continue;
+      }
       if (result.places?.length) allPlaces.push(...result.places);
       if (result.jokes?.length) allJokes.push(...result.jokes);
       if (result.conflicts?.length) allConflicts.push(...result.conflicts);
@@ -748,6 +793,12 @@ export async function generateFromParsedData(
         allEvents.push(...events);
       }
     }
+
+    if (failedSegments.length > 0) {
+      console.warn(
+        `[profileGenerator] 共 ${failedSegments.length}/${totalSegments} 个季度提取失败: ${failedSegments.join(', ')}`,
+      );
+    }
   }
 
   character.memories = {
@@ -763,5 +814,5 @@ export async function generateFromParsedData(
   onProgress?.('正在提取对话片段...');
   character.sampleConversations = extractSampleConversations(parseResult.messages);
 
-  return { character, events: allEvents };
+  return { character, events: allEvents, failedSegments };
 }

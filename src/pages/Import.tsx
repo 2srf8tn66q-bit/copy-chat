@@ -436,6 +436,29 @@ export default function ImportPage() {
               <p className="mt-3 text-base text-white/55">画像已生成，可以开始对话了。</p>
             </header>
 
+            {/* 失败 segment 警告 — 部分季度 LLM 提取失败时显示 */}
+            {generationResult.failedSegments && generationResult.failedSegments.length > 0 && (
+              <div
+                className="mb-6 rounded-lg p-4 flex items-start gap-3"
+                style={{
+                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                  border: '1px solid rgba(245, 158, 11, 0.25)',
+                }}
+              >
+                <AlertCircle size={16} className="shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+                <div className="text-sm leading-relaxed">
+                  <p className="text-white/90 mb-1">
+                    有 <span className="font-mono">{generationResult.failedSegments.length}</span> 个时间段的事件提取失败，可能导致 IF 线事件不完整。
+                  </p>
+                  <p className="text-white/55 text-xs">
+                    失败时段：{generationResult.failedSegments.join('、')}
+                    <br />
+                    一般是 LLM 临时限流或网络抽风。可以接受现状，或回到上一步点"生成画像"重试（已生成的部分会被覆盖）。
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="card-glass p-6">
               <div className="space-y-3 mb-6">
                 <div className="p-4 rounded-lg bg-white/[0.03]">
