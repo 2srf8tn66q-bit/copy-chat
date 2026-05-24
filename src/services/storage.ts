@@ -2,6 +2,7 @@ import { get, set, del, keys, entries, clear } from 'idb-keyval';
 import type { Character } from '../types/character';
 import type { Message, TimelineEvent } from '../types/timeline';
 import type { IFSession } from '../types/world';
+import type { GroupSession } from '../types/group';
 import type { PersonaPatch } from '../stores/characterStore';
 
 // Key prefixes
@@ -12,6 +13,7 @@ const EVENT_PREFIX = 'events:';
 const RAW_PREFIX = 'raw:';
 const BASELINE_PREFIX = 'baseline:';     // 画像首次被修正前的快照
 const FEEDBACK_PREFIX = 'feedback:';     // 每条修正反馈记录
+const GROUP_PREFIX = 'group:';           // 群聊会话
 
 // ==================== Character CRUD ====================
 
@@ -46,6 +48,13 @@ export async function deleteCharacter(id: string): Promise<void> {
         if (fb?.characterId === id) await del(k);
       })
   );
+  // 级联清理所有群里的 memberIds 引用
+  const groups = await getAllGroupSessions();
+  await Promise.all(
+    groups
+      .filter((g) => g.memberIds.includes(id))
+      .map((g) => saveGroupSession({ ...g, memberIds: g.memberIds.filter((mid) => mid !== id) })),
+  );
 }
 
 // ==================== Chat History CRUD ====================
@@ -55,7 +64,7 @@ export async function saveChatHistory(characterId: string, messages: Message[]):
 }
 
 export async function getChatHistory(characterId: string): Promise<Message[]> {
-  return get<Message[]>(`${CHAT_PREFIX}${characterId}`) ?? [];
+  return (await get<Message[]>(`${CHAT_PREFIX}${characterId}`)) ?? [];
 }
 
 export async function clearChatHistory(characterId: string): Promise<void> {
@@ -145,7 +154,7 @@ export async function saveTimelineEvents(characterId: string, events: TimelineEv
 }
 
 export async function getTimelineEvents(characterId: string): Promise<TimelineEvent[]> {
-  return get<TimelineEvent[]>(`${EVENT_PREFIX}${characterId}`) ?? [];
+  return (await get<TimelineEvent[]>(`${EVENT_PREFIX}${characterId}`)) ?? [];
 }
 
 // ==================== Data Import/Export ====================
@@ -176,7 +185,7 @@ export async function saveRawMessages(characterId: string, messages: Message[]):
 }
 
 export async function getRawMessages(characterId: string): Promise<Message[]> {
-  return get<Message[]>(`${RAW_PREFIX}${characterId}`) ?? [];
+  return (await get<Message[]>(`${RAW_PREFIX}${characterId}`)) ?? [];
 }
 
 /**
@@ -260,6 +269,28 @@ export async function deleteIFChatSession(characterId: string, sessionId: string
   const sessions = await get<IFChatSession[]>(`${IF_SESSIONS_PREFIX}${characterId}`) ?? [];
   const filtered = sessions.filter(s => s.id !== sessionId);
   await set(`${IF_SESSIONS_PREFIX}${characterId}`, filtered);
+}
+
+// ==================== Group Sessions ====================
+
+export async function saveGroupSession(session: GroupSession): Promise<void> {
+  await set(`${GROUP_PREFIX}${session.id}`, session);
+}
+
+export async function getGroupSession(id: string): Promise<GroupSession | undefined> {
+  return get<GroupSession>(`${GROUP_PREFIX}${id}`);
+}
+
+export async function getAllGroupSessions(): Promise<GroupSession[]> {
+  const allEntries = await entries<string, GroupSession>();
+  return allEntries
+    .filter(([key]) => (key as string).startsWith(GROUP_PREFIX))
+    .map(([, value]) => value)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export async function deleteGroupSession(id: string): Promise<void> {
+  await del(`${GROUP_PREFIX}${id}`);
 }
 
 // ==================== Utility ====================

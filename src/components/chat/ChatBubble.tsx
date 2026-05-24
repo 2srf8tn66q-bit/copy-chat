@@ -29,6 +29,44 @@ export default function ChatBubble({
 }: ChatBubbleProps) {
   const c = useChatColors();
 
+  // ── Hooks must be called unconditionally before any early return ──
+  // 仅 character 消息（非自己、非系统）才允许"修正"
+  const canRefine = message.sender === 'character' && message.type === 'text' && !!onRefine;
+
+  // Hover intent: 悬停 300ms 才显示，离开立刻消失
+  const [showRefine, setShowRefine] = useState(false);
+  const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (enterTimerRef.current) clearTimeout(enterTimerRef.current);
+    };
+  }, []);
+
+  // 显示中时挂一个全局 mousemove 监听 —— 真正以 wrapper 的几何边界判断"离开"
+  // 这是为了兜底 React onMouseLeave 在某些场景下漏触发（动画进场期间、display 变化时序）
+  useEffect(() => {
+    if (!showRefine) return;
+    let raf = 0;
+    const onMove = (e: MouseEvent) => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const el = wrapperRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) {
+          setShowRefine(false);
+        }
+      });
+    };
+    document.addEventListener('mousemove', onMove);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('mousemove', onMove);
+    };
+  }, [showRefine]);
+
   // System messages: centered small grey text, no bubble (gentle fade-in)
   if (message.type === 'system') {
     return (
@@ -165,43 +203,6 @@ export default function ChatBubble({
       )}
     </div>
   );
-
-  // 仅 character 消息（非自己、非系统）才允许"修正"
-  const canRefine = !isUser && message.type === 'text' && !!onRefine;
-
-  // Hover intent: 悬停 300ms 才显示，离开立刻消失
-  const [showRefine, setShowRefine] = useState(false);
-  const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    return () => {
-      if (enterTimerRef.current) clearTimeout(enterTimerRef.current);
-    };
-  }, []);
-
-  // 显示中时挂一个全局 mousemove 监听 —— 真正以 wrapper 的几何边界判断"离开"
-  // 这是为了兜底 React onMouseLeave 在某些场景下漏触发（动画进场期间、display 变化时序）
-  useEffect(() => {
-    if (!showRefine) return;
-    let raf = 0;
-    const onMove = (e: MouseEvent) => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const el = wrapperRef.current;
-        if (!el) return;
-        const r = el.getBoundingClientRect();
-        if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) {
-          setShowRefine(false);
-        }
-      });
-    };
-    document.addEventListener('mousemove', onMove);
-    return () => {
-      cancelAnimationFrame(raf);
-      document.removeEventListener('mousemove', onMove);
-    };
-  }, [showRefine]);
 
   const handleMouseEnter = () => {
     if (!canRefine) return;

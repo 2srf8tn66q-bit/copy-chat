@@ -7,11 +7,7 @@ export function createIFSession(
   characterId: string,
   startDate: string,
   worldRule: WorldRule,
-  events: TimelineEvent[],
 ): IFSession {
-  // Reset all events to pending for the new session
-  const resetEvents = events.map((e) => ({ ...e, status: 'pending' as const }));
-
   // We don't store events inside IFSession per the type; they're managed externally.
   // But we initialize the world state based on event context.
   const initialWorldState: WorldState = {

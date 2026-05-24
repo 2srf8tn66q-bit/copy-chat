@@ -6,7 +6,7 @@ import type { ChatMessage } from '../types/llm';
 export interface ChatContext {
   character: Character;
   chatHistory: ChatMessage[];
-  mode: 'private' | 'if';
+  mode: 'private' | 'if' | 'group';
   currentDate?: string;
 }
 
@@ -71,7 +71,12 @@ export function buildSystemPrompt(context: ChatContext): string {
   let identityLine = `你是${identity.name}`;
   if (genderPart) identityLine += `，${genderPart}`;
   if (relationPart) identityLine += `，是我的${relationPart}`;
-  identityLine += '。你正在和我微信聊天。';
+  // group 模式下场景由 groupPromptBuilder 的 addendum 接管，这里不写死"和我聊天"
+  if (mode === 'group') {
+    identityLine += '。';
+  } else {
+    identityLine += '。你正在和我微信聊天。';
+  }
   lines.push(identityLine);
   lines.push('');
 
@@ -166,6 +171,8 @@ export function buildSystemPrompt(context: ChatContext): string {
   }
 
   // ── Message style: burst mode ──
+  // 群聊里也保留 burst：这是角色从真实聊天记录学到的说话风格（连发短消息）。
+  // orchestrator 会把 ||| 拆成多条按延迟依次 append。
   if (character.messageStyle === 'burst') {
     lines.push('【连发模式】这是你强制遵守的输出格式要求：');
     lines.push('- 每次回复都必须拆成 2-4 条短消息');

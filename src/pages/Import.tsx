@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, FileText, AlertCircle, CheckCircle, Loader2, ChevronRight, ClipboardPaste, FolderOpen, Image, Video, MessageSquare, X } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle, Loader2, ChevronRight, ClipboardPaste, Image, Video, MessageSquare, X } from 'lucide-react';
 import { parseTextChat } from '../services/parser/textParser';
 import { parseHTMLChat, buildFileMap } from '../services/parser';
 import NavBar from '../components/layout/NavBar';

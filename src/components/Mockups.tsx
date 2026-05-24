@@ -1,4 +1,4 @@
-import { User, Search, MoreHorizontal, Phone, Video, Calendar, ChevronRight } from 'lucide-react';
+import { User, Search, MoreHorizontal, Phone, Video, Calendar } from 'lucide-react';
 
 function WindowFrame({ children }: { children: React.ReactNode }) {
   return (

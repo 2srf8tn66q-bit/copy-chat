@@ -108,7 +108,7 @@ export default function CharacterEditPage() {
     if (!character) return;
     const keys = path.split('.');
     const updated = JSON.parse(JSON.stringify(character)) as Character;
-    let target: Record<string, unknown> = updated;
+    let target = updated as unknown as Record<string, unknown>;
     for (let i = 0; i < keys.length - 1; i++) {
       target = target[keys[i]] as Record<string, unknown>;
     }
@@ -125,7 +125,7 @@ export default function CharacterEditPage() {
     if (!character) return;
     const keys = path.split('.');
     const updated = JSON.parse(JSON.stringify(character)) as Character;
-    let target: Record<string, unknown> = updated;
+    let target = updated as unknown as Record<string, unknown>;
     for (let i = 0; i < keys.length - 1; i++) {
       target = target[keys[i]] as Record<string, unknown>;
     }
@@ -139,7 +139,7 @@ export default function CharacterEditPage() {
     if (!character) return;
     const keys = path.split('.');
     const updated = JSON.parse(JSON.stringify(character)) as Character;
-    let target: Record<string, unknown> = updated;
+    let target = updated as unknown as Record<string, unknown>;
     for (let i = 0; i < keys.length - 1; i++) {
       target = target[keys[i]] as Record<string, unknown>;
     }
@@ -153,7 +153,7 @@ export default function CharacterEditPage() {
     if (!character) return;
     const keys = path.split('.');
     const updated = JSON.parse(JSON.stringify(character)) as Character;
-    let target: Record<string, unknown> = updated;
+    let target = updated as unknown as Record<string, unknown>;
     for (let i = 0; i < keys.length - 1; i++) {
       target = target[keys[i]] as Record<string, unknown>;
     }

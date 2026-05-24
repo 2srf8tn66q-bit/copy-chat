@@ -278,15 +278,6 @@ function parseWeFlowHTML(
   fileMap: Map<string, File>,
   contactName?: string
 ): HTMLParseResult {
-  const emptyResult: HTMLParseResult = {
-    messages: [],
-    participants: { self: '我', other: '对方' },
-    startDate: '',
-    endDate: '',
-    totalMessages: 0,
-    mediaCount: { images: 0, videos: 0 },
-    mediaFiles: [],
-  };
 
   // Identify participants by wxid
   const wxidSet = new Set<string>();
@@ -552,7 +543,7 @@ async function parseChatItems(
  * 备选解析：当标准选择器不匹配时，尝试更宽松的解析
  */
 async function parseFallback(
-  doc: Document,
+  _doc: Document,
   fileMap: Map<string, File>,
   items: NodeListOf<Element>
 ): Promise<HTMLParseResult> {

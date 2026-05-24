@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { LLMConfig, LLMProvider } from '../types';
+import type { LLMConfig } from '../types';
 
 interface LLMStore {
   configs: LLMConfig[];

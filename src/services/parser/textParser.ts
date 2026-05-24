@@ -44,9 +44,6 @@ const PATTERN_NAME_TIME = /^(\S+)\s+(\d{1,2}:\d{2}(?::\d{2})?)$/;
 // 格式1变体: "名字 上/下午H:MM"
 const PATTERN_NAME_TIME_PERIOD = /^(\S+)\s+([上下]午\s?\d{1,2}:\d{2})$/;
 
-// 格式1变体: 只有名字没有时间（当时间缺失时）
-const PATTERN_NAME_ONLY = /^(\S+)$/;
-
 // 格式2/3: 独立时间行 "HH:MM" 或 "H:MM"
 const PATTERN_TIME_ONLY = /^(\d{1,2}:\d{2}(?::\d{2})?)$/;
 
@@ -148,17 +145,6 @@ function parseDateLine(line: string): string | null {
 function isSystemMessage(text: string): boolean {
   const trimmed = text.trim();
   return SYSTEM_KEYWORDS.some((kw) => trimmed.includes(kw));
-}
-
-/**
- * 从日期字符串中提取 YYYY-MM-DD 部分
- */
-function extractDate(timestamp: string): string {
-  // timestamp 可能是 "YYYY-MM-DD HH:MM" 或只有 "HH:MM"
-  if (/^\d{4}-\d{2}-\d{2}/.test(timestamp)) {
-    return timestamp.substring(0, 10);
-  }
-  return timestamp.substring(0, 10);
 }
 
 // ─── 解析器：格式1 (名字 时间 / 消息内容) ────────────────
