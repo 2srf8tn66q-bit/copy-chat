@@ -10,6 +10,8 @@ import zhipuLogo from '../assets/providers/zhipu.png';
 import claudeLogo from '../assets/providers/claude.png';
 import aliyunLogo from '../assets/providers/aliyun.png';
 import minimaxLogo from '../assets/providers/minimax.png';
+import deepseekLogo from '../assets/providers/deepseek.png';
+import mimoLogo from '../assets/providers/mimo.png';
 import ollamaLogo from '../assets/providers/ollama.png';
 
 const PROVIDER_ICONS: Record<string, string> = {
@@ -19,6 +21,8 @@ const PROVIDER_ICONS: Record<string, string> = {
   claude: claudeLogo,
   aliyun: aliyunLogo,
   minimax: minimaxLogo,
+  deepseek: deepseekLogo,
+  mimo: mimoLogo,
   ollama: ollamaLogo,
 };
 
@@ -156,7 +160,7 @@ export default function OnboardingPage() {
             {/* Provider Grid */}
             <div>
               <label className="block text-xs font-semibold text-on-surface-variant mb-3 uppercase tracking-wider">选择服务商</label>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-5 gap-2">
                 {PROVIDER_OPTIONS.map((p) => {
                   const meta = PROVIDER_META[p];
                   const selected = formData.provider === p;
