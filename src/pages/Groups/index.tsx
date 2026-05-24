@@ -139,7 +139,7 @@ function EmptyGroupsState({
       <div className="relative h-full flex items-center px-10 md:px-16 lg:px-20">
         <div className="max-w-md">
           <p className="eyebrow mb-3 anim-fade-in delay-500">EMPTY · 还没有群</p>
-          <h2 className="text-h1 text-white anim-fade-up delay-700">把 TA 们拉一个群</h2>
+          <h2 className="text-h1 text-white anim-fade-up delay-700">TA 们还没碰过面</h2>
           <p className="mt-4 text-base text-white/60 leading-relaxed anim-fade-in delay-900">
             建一个小群（最多 {MAX_MEMBERS} 个角色），<br />
             看 TA 们在你面前怎么互相反应。
