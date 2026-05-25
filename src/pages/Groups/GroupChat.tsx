@@ -394,50 +394,56 @@ function GroupBubble({
   const bubbleBg = isUser ? c.outgoingBubble : c.incomingBubble;
   const bubbleText = isUser ? c.outgoingText : c.incomingText;
 
-  // 头像占 40px，gap-2 = 8px，所以名字 banner 左缩进 48px 才能贴到气泡的左边沿
-  const NAME_INDENT_PX = 48;
-
   return (
     <motion.div
-      className="px-3 py-0.5"
+      className={`flex items-start gap-2 px-3 py-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
       initial={{ opacity: 0, y: 10, scale: 0.96 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ type: 'spring', damping: 26, stiffness: 360, mass: 0.8 }}
     >
-      {/* 名字 banner —— 独立一行在气泡 row 上方，仅 incoming 显示 */}
-      {showHeader && !isUser && (
-        <div className="pt-0.5 pb-1" style={{ paddingLeft: `${NAME_INDENT_PX}px` }}>
-          <span style={{ fontSize: '12px', color: c.timestamp }}>{displayName}</span>
-        </div>
-      )}
+      {/* 头像在左列，items-start 让头像顶端与右列的名字 banner 顶端对齐 */}
+      <div className="shrink-0" style={{ width: '40px', height: '40px' }}>
+        {showHeader ? (
+          <div
+            className="flex items-center justify-center overflow-hidden"
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '4px',
+              backgroundColor: isUser ? c.avatarUserBg : c.avatarBg,
+            }}
+          >
+            {avatar ? (
+              <FadeImage src={avatar} alt="" className="h-full w-full object-cover" style={{ borderRadius: '4px' }} />
+            ) : (
+              <User size={20} color={c.avatarIcon} />
+            )}
+          </div>
+        ) : null}
+      </div>
 
-      {/* 头像 + 气泡 同一行，items-end 让头像底部与气泡底部对齐 */}
-      <div className={`flex items-end gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-        {/* Avatar slot — keep width even when hidden, so bubbles stay aligned */}
-        <div className="shrink-0" style={{ width: '40px', height: '40px' }}>
-          {showHeader ? (
-            <div
-              className="flex items-center justify-center overflow-hidden"
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '4px',
-                backgroundColor: isUser ? c.avatarUserBg : c.avatarBg,
-              }}
-            >
-              {avatar ? (
-                <FadeImage src={avatar} alt="" className="h-full w-full object-cover" style={{ borderRadius: '4px' }} />
-              ) : (
-                <User size={20} color={c.avatarIcon} />
-              )}
-            </div>
-          ) : null}
-        </div>
+      {/* 右列：名字 banner + 气泡。名字与气泡间距压紧让气泡紧贴名字 */}
+      <div
+        className={`flex flex-col min-w-0 ${isUser ? 'items-end' : 'items-start'}`}
+        style={{ maxWidth: '70%' }}
+      >
+        {showHeader && !isUser && (
+          <span
+            style={{
+              fontSize: '12px',
+              lineHeight: 1,
+              color: c.timestamp,
+              paddingLeft: '2px',
+              marginBottom: '3px',
+            }}
+          >
+            {displayName}
+          </span>
+        )}
 
         <div
-          className="relative px-3 py-2 min-w-0"
+          className="relative px-3 py-2"
           style={{
-            maxWidth: '70%',
             borderRadius: '4px',
             backgroundColor: bubbleBg,
             color: bubbleText,
@@ -488,33 +494,39 @@ function GroupBubble({
 
 function GroupTypingIndicator({ speaker }: { speaker: Character }) {
   const c = useChatColors();
-  // 与 GroupBubble 保持同一种结构：name banner 一行 + 头像/气泡同 row（items-end）
+  // 与 GroupBubble 保持同一种结构：items-start + 名字在气泡列上方紧贴
   return (
     <motion.div
-      className="px-3 py-0.5"
+      className="flex items-start gap-2 px-3 py-1"
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
     >
-      <div className="pt-0.5 pb-1" style={{ paddingLeft: '48px' }}>
-        <span style={{ fontSize: '12px', color: c.timestamp }}>
+      <div className="shrink-0" style={{ width: '40px', height: '40px' }}>
+        <div
+          className="flex items-center justify-center overflow-hidden"
+          style={{ width: '40px', height: '40px', borderRadius: '4px', backgroundColor: c.avatarBg }}
+        >
+          {speaker.identity.avatar ? (
+            <FadeImage src={speaker.identity.avatar} alt="" className="h-full w-full object-cover" style={{ borderRadius: '4px' }} />
+          ) : (
+            <User size={20} color={c.avatarIcon} />
+          )}
+        </div>
+      </div>
+      <div className="flex flex-col items-start min-w-0">
+        <span
+          style={{
+            fontSize: '12px',
+            lineHeight: 1,
+            color: c.timestamp,
+            paddingLeft: '2px',
+            marginBottom: '3px',
+          }}
+        >
           {speaker.identity.name} 正在输入…
         </span>
-      </div>
-      <div className="flex items-end gap-2">
-        <div className="shrink-0" style={{ width: '40px', height: '40px' }}>
-          <div
-            className="flex items-center justify-center overflow-hidden"
-            style={{ width: '40px', height: '40px', borderRadius: '4px', backgroundColor: c.avatarBg }}
-          >
-            {speaker.identity.avatar ? (
-              <FadeImage src={speaker.identity.avatar} alt="" className="h-full w-full object-cover" style={{ borderRadius: '4px' }} />
-            ) : (
-              <User size={20} color={c.avatarIcon} />
-            )}
-          </div>
-        </div>
         <div
           className="relative flex items-center gap-1 px-4 py-3"
           style={{
