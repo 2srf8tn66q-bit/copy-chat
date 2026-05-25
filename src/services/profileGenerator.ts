@@ -535,6 +535,106 @@ ${messageText}
   ];
 }
 
+// ═══════════════════════════════════════════════════════════
+// 自适应限流（AIMD）
+//
+// 默认 4 并发（付费用户全速跑）。
+// 任何一次 LLM 调用拿到 rate-limit 错误 → 自动降到串行 + 1.5s 间隔。
+// 所有降级后的请求（包括正在 in-flight 的重试）通过 SerialQueue 共享
+// 一个串行通道，避免 retry stampede 再次撞墙。
+// 这样 Kimi free（3 RPM / 3 并发）也能跑完，付费用户不付速度代价。
+// ═══════════════════════════════════════════════════════════
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** 简易串行队列：任务挂在 promise chain 上，可选 task 间间隔。 */
+class SerialQueue {
+  private tail: Promise<unknown> = Promise.resolve();
+  enqueue<T>(fn: () => Promise<T>, delayBeforeMs: number): Promise<T> {
+    const result = this.tail.then(async () => {
+      if (delayBeforeMs > 0) await sleep(delayBeforeMs);
+      return fn();
+    });
+    // 链尾推进到 fn 完成（成败都算），错误不传播给后续 enqueue
+    this.tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+}
+
+interface AdaptiveThrottle {
+  batchSize: number;
+  interDelayMs: number;
+  queue: SerialQueue;
+}
+
+function createThrottle(initialBatchSize: number): AdaptiveThrottle {
+  return { batchSize: initialBatchSize, interDelayMs: 0, queue: new SerialQueue() };
+}
+
+/** 判断错误是否为限流类（用 humanizeApiError 输出 + 常见关键词匹配）。 */
+function isRateLimitError(msg: string): boolean {
+  return /请求太频繁|rate.?limit|concurrency|429|too many requests/i.test(msg);
+}
+
+/** 第一次撞限流 → 降级。已降级则幂等。 */
+function tripThrottle(throttle: AdaptiveThrottle, label: string): void {
+  if (throttle.batchSize > 1) {
+    throttle.batchSize = 1;
+    throttle.interDelayMs = 1500;
+    console.warn(
+      `[profileGenerator] ${label} 触发限流，自动降级为串行 + ${throttle.interDelayMs}ms 间隔（剩余请求会更慢但不会再撞墙）`,
+    );
+  }
+}
+
+/** 限流降级后所有 LLM 调用走串行队列；未降级时直发。 */
+async function throttledSend(
+  llmConfig: LLMConfig,
+  messages: ChatMessage[],
+  throttle: AdaptiveThrottle,
+): Promise<string> {
+  if (throttle.batchSize <= 1 && throttle.interDelayMs > 0) {
+    return throttle.queue.enqueue(() => sendChatMessage(llmConfig, messages), throttle.interDelayMs);
+  }
+  return sendChatMessage(llmConfig, messages);
+}
+
+/**
+ * 通用重试 wrapper：限流错误用长 backoff（覆盖服务端 1s 窗口），
+ * 普通错误用短 backoff。jitter 防止 retry stampede。
+ * 重试中检测到限流也会 trip throttle。
+ */
+async function callWithRetry(
+  llmConfig: LLMConfig,
+  messages: ChatMessage[],
+  throttle: AdaptiveThrottle,
+  label: string,
+): Promise<string> {
+  const RETRY_DELAYS_NORMAL = [500, 1500];
+  const RETRY_DELAYS_RATE_LIMIT = [2000, 4000];
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await throttledSend(llmConfig, messages, throttle);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isRL = isRateLimitError(msg);
+      if (isRL) tripThrottle(throttle, label);
+
+      const delays = isRL ? RETRY_DELAYS_RATE_LIMIT : RETRY_DELAYS_NORMAL;
+      if (attempt < delays.length) {
+        const jitter = Math.random() * 500;
+        const delayMs = Math.round(delays[attempt] + jitter);
+        console.warn(`[profileGenerator] ${label} attempt ${attempt + 1} 失败，${delayMs}ms 后重试: ${msg}`);
+        await sleep(delayMs);
+      } else {
+        console.error(`[profileGenerator] ${label} 重试用尽，放弃。原始错误: ${msg}`);
+        throw err;
+      }
+    }
+  }
+}
+
 interface SegmentExtractResult {
   /** 季度结果（成功提取的内容，失败时为空 result） */
   result: SegmentResult;
@@ -545,7 +645,7 @@ interface SegmentExtractResult {
 }
 
 /**
- * 单个季度的提取：内置 2 次重试，指数退避。
+ * 单个季度的提取：通过 callWithRetry 走自适应限流通道。
  * 失败时打 console.error 暴露真因（429/JSON 解析错/超时等），
  * 不再静默返回空数据，让调用方能汇总失败 segment 提示用户。
  */
@@ -553,51 +653,49 @@ async function extractSegment(
   segment: QuarterSegment,
   participants: { self: string; other: string },
   llmConfig: LLMConfig,
+  throttle: AdaptiveThrottle,
 ): Promise<SegmentExtractResult> {
   const empty: SegmentResult = {
     places: [], jokes: [], conflicts: [],
     relationshipMilestones: [], events: [],
   };
-  const RETRY_DELAYS_MS = [500, 1500];  // 重试 2 次：0.5s, 1.5s
   const prompt = buildSegmentPrompt(segment, participants);
+  const label = `segment ${segment.label}`;
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    try {
-      const response = await sendChatMessage(llmConfig, prompt);
-      const parsed = safeParseJSON<SegmentResult | null>(response, null);
-      if (!parsed) {
-        // JSON 解析失败 —— 算作可重试错误
-        throw new Error('LLM 返回非合法 JSON');
-      }
-      return { result: parsed, label: segment.label, ok: true };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (attempt < RETRY_DELAYS_MS.length) {
-        console.warn(
-          `[profileGenerator] segment ${segment.label} attempt ${attempt + 1} 失败，` +
-          `${RETRY_DELAYS_MS[attempt]}ms 后重试: ${msg}`,
-        );
-        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
-      } else {
-        console.error(
-          `[profileGenerator] segment ${segment.label} 重试用尽，放弃。原始错误: ${msg}`,
-        );
-        return { result: empty, label: segment.label, ok: false };
-      }
+  try {
+    const response = await callWithRetry(llmConfig, prompt, throttle, label);
+    const parsed = safeParseJSON<SegmentResult | null>(response, null);
+    if (!parsed) {
+      console.error(`[profileGenerator] ${label} LLM 返回非合法 JSON，放弃`);
+      return { result: empty, label: segment.label, ok: false };
     }
+    return { result: parsed, label: segment.label, ok: true };
+  } catch {
+    // callWithRetry 已经 console.error 过原因了
+    return { result: empty, label: segment.label, ok: false };
   }
-  // unreachable, TS 类型缝合
-  return { result: empty, label: segment.label, ok: false };
 }
 
-async function runInBatches<T>(
+/**
+ * 自适应批量执行：每轮开始前读 throttle.batchSize 决定串/并发。
+ * 串行模式下 task 内部已走 SerialQueue（throttledSend），不需要外层再串。
+ */
+async function runAdaptive<T>(
   tasks: (() => Promise<T>)[],
-  batchSize: number,
+  throttle: AdaptiveThrottle,
 ): Promise<T[]> {
   const results: T[] = [];
-  for (let i = 0; i < tasks.length; i += batchSize) {
-    const batch = tasks.slice(i, i + batchSize);
-    results.push(...await Promise.all(batch.map(t => t())));
+  let i = 0;
+  while (i < tasks.length) {
+    if (throttle.batchSize <= 1) {
+      // 串行：每次只起 1 个；task 内部 throttledSend 会走 SerialQueue 加间隔
+      results.push(await tasks[i]());
+      i += 1;
+    } else {
+      const batch = tasks.slice(i, i + throttle.batchSize);
+      results.push(...(await Promise.all(batch.map((t) => t()))));
+      i += batch.length;
+    }
   }
   return results;
 }
@@ -660,34 +758,17 @@ export async function generateFromParsedData(
 
   const character = defaultResult.character;
 
+  // 整次生成共享一个自适应限流状态，主画像 + 所有 segments 共用
+  const throttle = createThrottle(4);
+
   // ─── 第一步：LLM 生成画像 ────
   onProgress?.('正在生成性格画像...');
 
   try {
     const profileMessages = buildProfilePrompt(parseResult, candidateQuotes);
-    // 主画像调用加重试，覆盖 429 / 瞬时网络抽风。
-    // contentFilter 这种"确定性拒绝"重试也没用，但成本低，先试再说。
-    const PROFILE_RETRY_DELAYS = [800, 2000];  // 重试 2 次
-    let profileResponse = '';
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt <= PROFILE_RETRY_DELAYS.length; attempt++) {
-      try {
-        profileResponse = await sendChatMessage(llmConfig, profileMessages);
-        lastErr = null;
-        break;
-      } catch (err) {
-        lastErr = err;
-        if (attempt < PROFILE_RETRY_DELAYS.length) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(
-            `[profileGenerator] 主画像 attempt ${attempt + 1} 失败，` +
-            `${PROFILE_RETRY_DELAYS[attempt]}ms 后重试: ${msg}`,
-          );
-          await new Promise((r) => setTimeout(r, PROFILE_RETRY_DELAYS[attempt]));
-        }
-      }
-    }
-    if (lastErr) throw lastErr;
+    // 主画像通过 callWithRetry 走自适应限流，限流错误会自动 trip throttle
+    // → 后续 segment 一开始就走串行，省去再撞一次墙的时间
+    const profileResponse = await callWithRetry(llmConfig, profileMessages, throttle, '主画像');
     const parsed = safeParseJSON<Record<string, unknown> | null>(profileResponse, null);
 
     if (parsed) {
@@ -773,7 +854,6 @@ export async function generateFromParsedData(
 
   // ─── 第二步：分段提取 memories + IF 线事件 ────
   const segments = divideByQuarter(parseResult.messages);
-  const batchSize = 4;
   const totalSegments = segments.length;
   let completedSegments = 0;
 
@@ -788,7 +868,7 @@ export async function generateFromParsedData(
     onProgress?.(`正在提取记忆 (0/${totalSegments})...`);
 
     const tasks = segments.map(segment => () =>
-      extractSegment(segment, parseResult.participants, llmConfig)
+      extractSegment(segment, parseResult.participants, llmConfig, throttle)
         .then(extractResult => {
           completedSegments++;
           onProgress?.(`正在提取记忆 (${completedSegments}/${totalSegments})...`);
@@ -796,7 +876,7 @@ export async function generateFromParsedData(
         })
     );
 
-    const segmentResults = await runInBatches(tasks, batchSize);
+    const segmentResults = await runAdaptive(tasks, throttle);
     const validTypes = ['conflict', 'confession', 'plan', 'turning_point', 'separation', 'reunion', 'daily_share'];
 
     for (const { result, label, ok } of segmentResults) {
