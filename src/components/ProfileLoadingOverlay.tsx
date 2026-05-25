@@ -31,6 +31,14 @@ const PHASES: Phase[] = [
   { id: 'memory',   label: '生成时间线',    match: /记忆|时间线|事件|memory|timeline/i },
 ];
 
+/** 把秒数格式化成 "12s" / "1 分 23 秒" / "5 分钟"，长生成时更易读 */
+function formatElapsed(s: number): string {
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return rem === 0 ? `${m} 分钟` : `${m} 分 ${rem} 秒`;
+}
+
 export default function ProfileLoadingOverlay({ visible, message }: ProfileLoadingOverlayProps) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -124,10 +132,16 @@ export default function ProfileLoadingOverlay({ visible, message }: ProfileLoadi
               正在还原 TA 的身影
             </h2>
             <p
-              className="text-center text-sm text-white/55 mb-10"
+              className="text-center text-sm text-white/55"
               style={{ textShadow: '0 1px 6px rgba(0,0,0,0.6)' }}
             >
-              {elapsed > 0 ? `已用 ${elapsed}s · ` : ''}请稍候，整个过程通常需要 30-60 秒
+              {elapsed > 0 ? `已用 ${formatElapsed(elapsed)} · ` : ''}时长视聊天记录大小而定，约 5–10 分钟
+            </p>
+            <p
+              className="text-center text-xs text-white/35 mt-2 mb-10 px-4"
+              style={{ textShadow: '0 1px 6px rgba(0,0,0,0.6)', lineHeight: 1.55 }}
+            >
+              部分对话内容可能因 LLM 审核被略过，不影响后续使用
             </p>
 
             {/* Phase indicators */}
