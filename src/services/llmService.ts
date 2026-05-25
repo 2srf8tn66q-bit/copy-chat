@@ -118,7 +118,9 @@ export async function sendChatMessage(config: LLMConfig, messages: ChatMessage[]
     : buildOpenAICompatibleRequest(config, messages);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000); // 120s timeout
+  // 240s timeout：Kimi free 等紧额度 plan 串行模式下大 prompt 可能慢；
+  // 普通调用 30-60s 完事，多出来的余量只是兜底
+  const timeout = setTimeout(() => controller.abort(), 240000);
 
   try {
     const response = await fetch('/api/llm/proxy', {

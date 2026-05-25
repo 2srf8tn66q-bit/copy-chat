@@ -576,13 +576,39 @@ function isRateLimitError(msg: string): boolean {
   return /请求太频繁|rate.?limit|concurrency|429|too many requests/i.test(msg);
 }
 
-/** 第一次撞限流 → 降级。已降级则幂等。 */
+/**
+ * 撞限流 → 降级，进阶递增间隔。
+ * 第 1 次：batchSize=1, 间隔 1.5s（覆盖一般付费 plan）
+ * 第 2 次：3s
+ * 第 3 次：6s
+ * 第 4 次：12s
+ * 第 5 次：20s 封顶（=3 RPM，覆盖 Kimi free 等紧额度）
+ * 已降到最大间隔再撞墙说明用户 plan 太紧，需要换或充值。
+ */
+const ESCALATION_STEPS_MS = [1500, 3000, 6000, 12000, 20000];
+
 function tripThrottle(throttle: AdaptiveThrottle, label: string): void {
   if (throttle.batchSize > 1) {
+    // 第一次降级：并发 → 串行
     throttle.batchSize = 1;
-    throttle.interDelayMs = 1500;
+    throttle.interDelayMs = ESCALATION_STEPS_MS[0];
     console.warn(
-      `[profileGenerator] ${label} 触发限流，自动降级为串行 + ${throttle.interDelayMs}ms 间隔（剩余请求会更慢但不会再撞墙）`,
+      `[profileGenerator] ${label} 触发限流，降级为串行 + ${throttle.interDelayMs}ms 间隔`,
+    );
+    return;
+  }
+  // 已经在串行模式还撞墙 → 加大间隔
+  const currentIdx = ESCALATION_STEPS_MS.indexOf(throttle.interDelayMs);
+  const nextIdx = Math.min(currentIdx + 1, ESCALATION_STEPS_MS.length - 1);
+  const nextDelay = ESCALATION_STEPS_MS[nextIdx];
+  if (nextDelay > throttle.interDelayMs) {
+    console.warn(
+      `[profileGenerator] ${label} 串行模式仍撞墙，间隔 ${throttle.interDelayMs}ms → ${nextDelay}ms`,
+    );
+    throttle.interDelayMs = nextDelay;
+  } else if (currentIdx === ESCALATION_STEPS_MS.length - 1) {
+    console.warn(
+      `[profileGenerator] ${label} 已经在最大间隔（${nextDelay}ms = 3 RPM）仍撞墙，可能 LLM plan 配额太紧`,
     );
   }
 }
@@ -600,9 +626,12 @@ async function throttledSend(
 }
 
 /**
- * 通用重试 wrapper：限流错误用长 backoff（覆盖服务端 1s 窗口），
- * 普通错误用短 backoff。jitter 防止 retry stampede。
- * 重试中检测到限流也会 trip throttle。
+ * 通用重试 wrapper：
+ * - 限流错误：每次重试都会 trip throttle 进阶递增间隔；重试 backoff 至少等
+ *   throttle.interDelayMs 让 SerialQueue 真正间隔生效
+ * - 普通错误（500/timeout 等）：短 backoff 快速重试
+ * - 5 次重试给进阶降级足够时间 kick in（最坏情况 20s 间隔 × 5 ≈ 100s）
+ * - jitter 防止重试 stampede
  */
 async function callWithRetry(
   llmConfig: LLMConfig,
@@ -610,8 +639,8 @@ async function callWithRetry(
   throttle: AdaptiveThrottle,
   label: string,
 ): Promise<string> {
-  const RETRY_DELAYS_NORMAL = [500, 1500];
-  const RETRY_DELAYS_RATE_LIMIT = [2000, 4000];
+  const RETRY_DELAYS_NORMAL = [500, 1500, 3000];                   // 普通错误 3 次重试
+  const RETRY_DELAYS_RATE_LIMIT_BASE = [2000, 4000, 8000, 12000];  // 限流 4 次重试
 
   for (let attempt = 0; ; attempt++) {
     try {
@@ -621,10 +650,14 @@ async function callWithRetry(
       const isRL = isRateLimitError(msg);
       if (isRL) tripThrottle(throttle, label);
 
-      const delays = isRL ? RETRY_DELAYS_RATE_LIMIT : RETRY_DELAYS_NORMAL;
+      const delays = isRL ? RETRY_DELAYS_RATE_LIMIT_BASE : RETRY_DELAYS_NORMAL;
       if (attempt < delays.length) {
+        // 限流重试间隔至少等 throttle 当前间隔，否则 SerialQueue 节流无意义
+        const baseDelay = isRL
+          ? Math.max(delays[attempt], throttle.interDelayMs)
+          : delays[attempt];
         const jitter = Math.random() * 500;
-        const delayMs = Math.round(delays[attempt] + jitter);
+        const delayMs = Math.round(baseDelay + jitter);
         console.warn(`[profileGenerator] ${label} attempt ${attempt + 1} 失败，${delayMs}ms 后重试: ${msg}`);
         await sleep(delayMs);
       } else {
