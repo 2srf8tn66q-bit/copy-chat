@@ -110,17 +110,33 @@ function buildProxyPayload(url: string, headers: Record<string, string>, body: u
 
 /**
  * Send a chat message to the LLM and return the assistant's response text.
+ * @param externalSignal 可选外部 AbortSignal —— 用户点"停止接话"时取消正在 in-flight 的 fetch
  */
-export async function sendChatMessage(config: LLMConfig, messages: ChatMessage[]): Promise<string> {
+export async function sendChatMessage(
+  config: LLMConfig,
+  messages: ChatMessage[],
+  externalSignal?: AbortSignal,
+): Promise<string> {
   const isClaude = config.provider === 'claude';
   const { url, headers, body } = isClaude
     ? buildClaudeRequest(config, messages)
     : buildOpenAICompatibleRequest(config, messages);
 
+  // 内部 controller 控 timeout；外部 signal 触发时也 abort 它，让 fetch 立即终止
   const controller = new AbortController();
   // 240s timeout：Kimi free 等紧额度 plan 串行模式下大 prompt 可能慢；
   // 普通调用 30-60s 完事，多出来的余量只是兜底
   const timeout = setTimeout(() => controller.abort(), 240000);
+
+  let externalAbortHandler: (() => void) | null = null;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalAbortHandler = () => controller.abort();
+      externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
+    }
+  }
 
   try {
     const response = await fetch('/api/llm/proxy', {
@@ -151,11 +167,18 @@ export async function sendChatMessage(config: LLMConfig, messages: ChatMessage[]
     }
   } catch (error: unknown) {
     if (error instanceof DOMException && error.name === 'AbortError') {
+      // 区分用户主动取消 vs 超时
+      if (externalSignal?.aborted) {
+        throw new DOMException('Request aborted by user', 'AbortError');
+      }
       throw new Error('请求超时，请稍后重试');
     }
     throw error;
   } finally {
     clearTimeout(timeout);
+    if (externalSignal && externalAbortHandler) {
+      externalSignal.removeEventListener('abort', externalAbortHandler);
+    }
   }
 }
 

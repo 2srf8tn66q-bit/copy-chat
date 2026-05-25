@@ -46,6 +46,7 @@ export default function GroupChatPage() {
   const [typingSpeaker, setTypingSpeaker] = useState<Character | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -112,6 +113,7 @@ export default function GroupChatPage() {
         onComplete: () => {
           setTypingSpeaker(null);
           setRunning(false);
+          setStopping(false);
           abortRef.current = null;
         },
         onError: (err) => {
@@ -123,6 +125,8 @@ export default function GroupChatPage() {
   };
 
   const handleStop = () => {
+    if (stopping) return;
+    setStopping(true);
     abortRef.current?.abort();
   };
 
@@ -251,15 +255,17 @@ export default function GroupChatPage() {
         <div className="flex justify-center pb-2">
           <button
             onClick={handleStop}
-            className="inline-flex items-center gap-1.5 text-xs rounded-full px-3 py-1.5 transition-colors"
+            disabled={stopping}
+            className="inline-flex items-center gap-1.5 text-xs rounded-full px-3 py-1.5 transition-colors disabled:cursor-not-allowed"
             style={{
               backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
               color: c.headerText,
               border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}`,
+              opacity: stopping ? 0.6 : 1,
             }}
           >
             <Square size={10} fill="currentColor" />
-            停止接话
+            {stopping ? '停止中…' : '停止接话'}
           </button>
         </div>
       )}

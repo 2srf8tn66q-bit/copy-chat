@@ -98,9 +98,11 @@ export async function runGroupTurn(opts: OrchestratorOptions): Promise<void> {
           lastSpeakerId,
           consecutiveAiTurns: consecutiveAi,
         });
-        const raw = await sendChatMessage(llmConfig, schedulerMessages);
+        const raw = await sendChatMessage(llmConfig, schedulerMessages, signal);
         speakerId = parseSchedulerResponse(raw, memberIds);
       } catch (err) {
+        // 用户主动取消 → 不要走"随机 fallback"路径，直接把 abort 抛到外层处理
+        if (signal?.aborted) throw err;
         // 调度失败：第一轮强制随机选一个，后续轮直接停
         if (aiTurnsThisRound === 0) {
           speakerId = memberIds[Math.floor(Math.random() * memberIds.length)];
@@ -137,7 +139,7 @@ export async function runGroupTurn(opts: OrchestratorOptions): Promise<void> {
         userDisplayName,
         history: workingHistory,
       });
-      const rawReply = await sendChatMessage(llmConfig, speakerMessages);
+      const rawReply = await sendChatMessage(llmConfig, speakerMessages, signal);
 
       if (isAborted()) { callbacks.onComplete?.('aborted'); return; }
 
@@ -175,6 +177,12 @@ export async function runGroupTurn(opts: OrchestratorOptions): Promise<void> {
     }
     callbacks.onComplete?.('maxTurns');
   } catch (err) {
+    // 用户主动取消（fetch AbortError 或外部 signal 已 aborted）→ 走 'aborted' 路径，不当成错误
+    const isAbortErr = err instanceof DOMException && err.name === 'AbortError';
+    if (isAbortErr || signal?.aborted) {
+      callbacks.onComplete?.('aborted');
+      return;
+    }
     callbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
     callbacks.onComplete?.('error');
   }
